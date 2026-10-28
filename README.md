@@ -32,9 +32,10 @@ Then open **http://localhost:8080**. Stop the server with `Ctrl+C`.
 | Where | Controls |
 |-------|----------|
 | Arcade | Click a cabinet, or press **1 / 2 / 3**, or **Left/Right + Enter** |
-| Every machine | **Esc** (or click **ESC MENU** top-right) → Resume / Restart / Return to Arcade |
+| Every machine | **Esc** (or click **ESC MENU** top-right) → Resume / Restart / Return to Arcade / Sound |
+| Anywhere | **M** toggles sound |
 | Ghoul Shift | **WASD** move · **mouse** aim (click to capture the mouse) · **Arrow keys / Q E** turn · **Click / Space** shoot |
-| Pebble Jump | **A D / Arrows** run · **W / Space / Up** jump |
+| Pebble Jump | **A D / Arrows** run · **W / Space / Up** jump · land on beetles to stomp them |
 | Ember Tale | **WASD / Arrows** walk · **Space / Enter / E** talk & confirm · battle menu: Up/Down + Enter or click |
 
 The arcade remembers each machine's **CLEARED** status and **BEST** score for the current browser session (refreshing the page resets it).
@@ -53,10 +54,27 @@ src/games/_template/  minimal machine that exercises the whole contract
 src/games/shooter/    GHOUL SHIFT   (logic / raycaster / sprites / map data)
 src/games/platformer/ PEBBLE JUMP   (logic / physics / sprites / level data)
 src/games/rpg/        EMBER TALE    (logic / battle / sprites / map + dialogue data)
+tests/                bots, headless runner (npm test), in-browser integration suite
 ```
 
 See **TEAM.md** for the game contract (lifecycle, input, audio, scoring) and ownership.
 
+## Tests
+
+```bash
+npm test
+```
+
+Plays all three machines headlessly with scripted bots (`tests/bots.js`): each must be winnable, losable, and must not end on its own while idle; `finish` must fire exactly once.
+
+In-browser integration suite (game open at http://localhost:8080, window visible, hands off the game for ~2 minutes):
+
+```js
+(await import('/tests/browser-integration.js')).run().then(console.table)
+```
+
+It drives the real page with key/mouse events through every machine (enter, pause, resume, win/lose, play again, return, re-enter, rapid switching) and reports a `userInput` count so a run disturbed by real clicks is easy to spot.
+
 ## Debugging
 
-In the browser console, `window.__arcade.manager.debug()` shows the current mode, machine, overlay, listener count, live sounds, frame stats and session progress.
+In the browser console, `window.__arcade.manager.debug()` shows the current mode, machine, overlay, listener count, live sounds, frame stats, session progress and the running game's own `debug()` snapshot.

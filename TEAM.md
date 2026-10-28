@@ -10,7 +10,7 @@ one 16-color palette (`src/core/palette.js`), 3×5 pixel font, synthesized arcad
 | Machine | Minimum playable scope | Win | Lose | Score (integer, higher is better) |
 |---|---|---|---|---|
 | GHOUL SHIFT (shooter) | One arena, WASD + mouse aim, one weapon, one enemy type, health, 3 waves (3/5/8) | Clear wave 3 | Health 0 | `kills × 100 + health remaining` (on loss: `kills × 100`) |
-| PEBBLE JUMP (platformer) | One short level, run/jump, platforms, coins, spikes, flag | Touch the flag | 3 lives lost (spikes / falling) | `coins × 10 + lives × 50` (on loss: `coins × 10`) |
+| PEBBLE JUMP (platformer) | One short level, run/jump, platforms, coins, spikes, beetles, flag | Touch the flag | 3 lives lost (spikes / beetles / falling) | `coins × 10 + stomps × 25 + lives × 50` (on loss: `coins × 10 + stomps × 25`) |
 | EMBER TALE (rpg) | One room, one NPC, short talk, one turn-based battle (Attack / Heal), report back | Report back after winning the battle | HP 0 in battle | `100 + HP remaining × 10` (on loss: `0`) |
 
 Pre-approved cuts if time runs short (in order): shooter keyboard-only turning → platformer spikes only
@@ -72,7 +72,7 @@ export function createGame(api) {
 Rules for games:
 - **Never** call `requestAnimationFrame`, `setInterval`, or `setTimeout`. Use `dt` timers inside `update`.
 - **Never** add DOM listeners directly. Use the input API, or `api.listen()` if truly needed.
-- **Never** use the **Escape** key; it belongs to the arcade.
+- **Never** use the **Escape** or **M** keys; they belong to the arcade (pause, mute).
 - Keep the **top-right 44×12 px** clear of important HUD — the ESC MENU tag lives there.
 - Do not reset canvas size or transforms permanently; the arcade wraps `draw` in `save()/restore()`.
 
@@ -170,6 +170,15 @@ and is what the automated playtests read. It must not change state.
   (platformer, RPG) recorded once, Play Again is a fresh instance, ESC MENU tag, return from pause and from
   result screen, re-entry after a win is fresh, 9 rapid switches leave 0 listeners / 0 live sounds, loop
   stays at 60 updates/s, hub shows CLEARED / BEST for every machine. No console errors.
+- **Polish pass** (each followed by `npm test`, 9/9): hub↔machine blinds transition, M / pause-menu sound
+  toggle, per-machine control hint in the hub; PEBBLE JUMP stompable beetles (one moved after testing showed it
+  sat in a blind landing spot after a pit); GHOUL SHIFT death bursts, red hit marker, minimap; EMBER TALE
+  battle lunges, floating damage/heal numbers, heal sparkles. Tests now live in `tests/` (see README).
+- **Browser suite after polish: 18 / 22 pass, 4 not run to completion.** Everything through the RPG section
+  passed with no user input. The last four (shooter win in the page, 9 rapid switches, 60 updates/s, all-three
+  progress) could not run because the browser window went hidden (page reported 0–2 updates/s before the
+  test touched anything). The same four passed in the pre-polish browser run, and the shooter win passes
+  headlessly. **To do:** re-run the browser suite once with the window visible.
 - **Not verified automatically:** mouse capture (pointer lock) in GHOUL SHIFT — browsers only allow it from a
   real click, so it needs a human check: click to aim, press Esc (should pause and free the mouse), Resume.
   Audio was exercised (correct sounds requested and stopped) but not listened to.
