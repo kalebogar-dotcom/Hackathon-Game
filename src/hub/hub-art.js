@@ -111,32 +111,69 @@ const SCREENS = {
       g.fillRect(x + w / 2, y + h / 2 - 4, 1, 3);
       g.fillRect(x + w / 2, y + h / 2 + 2, 1, 3);
     }
+
   },
-  platformer(g, x, y, w, h, t) {
-    g.fillStyle = PAL.sky;
+    platformer(g, x, y, w, h, t) {
+    // PIXEL CHIC: a little doll that changes outfits
+    g.fillStyle = PAL.indigo;
     g.fillRect(x, y, w, h);
-    g.fillStyle = PAL.cream;
-    g.fillRect(x + ((t * 6) % (w + 12)) - 10, y + 4, 9, 3);
-    g.fillStyle = PAL.green;
-    g.fillRect(x, y + h - 6, w, 6);
-    g.fillStyle = PAL.forest;
-    g.fillRect(x, y + h - 2, w, 2);
-    g.fillStyle = PAL.brown;
-    g.fillRect(x + 22, y + 12, 12, 3);
-    // Coin
-    if (Math.sin(t * 5) > -0.5) {
-      g.fillStyle = PAL.yellow;
-      g.fillRect(x + 27, y + 7, 2, 3);
+    g.fillStyle = PAL.night;
+    for (let bx = 4; bx < w; bx += 8) g.fillRect(x + bx, y, 1, h - 3);
+    g.fillStyle = PAL.violet;
+    g.fillRect(x, y + h - 3, w, 3);
+
+    const k = Math.floor(t / 1.4) % 4;
+    const dress = [PAL.red, PAL.blue, PAL.yellow, PAL.teal][k];
+    const trim = [PAL.cream, PAL.cream, PAL.orange, PAL.cream][k];
+    const hair = [PAL.brown, PAL.black, PAL.red, PAL.violet][k];
+    const skin = '#f0c39c';
+    const bob = Math.sin(t * 3) > 0.3 ? 1 : 0;
+    const px = Math.round(x + w / 2) - 3;
+    const top = y + h - 19 - bob;
+
+    g.fillStyle = hair;                      // hair behind
+    g.fillRect(px - 1, top + 1, 9, 8);
+    g.fillStyle = skin;                      // head
+    g.fillRect(px, top + 2, 7, 5);
+    g.fillStyle = hair;                      // fringe
+    g.fillRect(px - 1, top, 9, 3);
+    if (t % 3 < 2.85) {                      // eyes (blink)
+      g.fillStyle = PAL.black;
+      g.fillRect(px + 1, top + 4, 1, 1);
+      g.fillRect(px + 5, top + 4, 1, 1);
     }
-    // Hopping pebble hero
-    const hop = Math.abs(Math.sin(t * 4)) * 12;
-    const px = x + 8, py = y + h - 11 - hop;
-    g.fillStyle = PAL.grey;
-    g.fillRect(px, py, 5, 5);
-    g.fillStyle = PAL.orange;
-    g.fillRect(px, py + 3, 5, 1);
-    g.fillStyle = PAL.black;
-    g.fillRect(px + 3, py + 1, 1, 1);
+      
+    g.fillStyle = '#f28ab2';                 // blush
+    g.fillRect(px, top + 5, 1, 1);
+    g.fillRect(px + 6, top + 5, 1, 1);
+    g.fillStyle = PAL.maroon;                // smile
+    g.fillRect(px + 3, top + 6, 1, 1);
+
+    g.fillStyle = skin;                      // arms
+    g.fillRect(px, top + 8, 1, 3);
+    g.fillRect(px + 6, top + 8, 1, 3);
+    g.fillStyle = dress;                     // dress
+    g.fillRect(px + 1, top + 7, 5, 4);
+    g.fillRect(px - 1, top + 11, 9, 4);
+    g.fillStyle = trim;
+    g.fillRect(px + 1, top + 10, 5, 1);
+    g.fillRect(px - 1, top + 14, 9, 1);
+    g.fillStyle = PAL.black;                 // shoes
+    g.fillRect(px + 1, top + 15, 2, 1);
+    g.fillRect(px + 4, top + 15, 2, 1);
+
+      // twinkling sparkles
+    const spots = [[4, 5], [w - 6, 8], [6, h - 11], [w - 5, h - 13]];
+    spots.forEach(([sx, sy], i) => {
+      if (Math.sin(t * 5 + i * 1.7) > 0.2) {
+        g.fillStyle = i % 2 ? PAL.cream : PAL.yellow;
+        g.fillRect(x + sx, y + sy, 1, 1);
+        g.fillRect(x + sx - 1, y + sy, 1, 1);
+        g.fillRect(x + sx + 1, y + sy, 1, 1);
+        g.fillRect(x + sx, y + sy - 1, 1, 1);
+        g.fillRect(x + sx, y + sy + 1, 1, 1);
+      }
+    });
   },
   rpg(g, x, y, w, h, t) {
     for (let ty = 0; ty < h; ty += 6) {
