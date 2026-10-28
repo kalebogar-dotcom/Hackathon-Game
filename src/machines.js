@@ -4,10 +4,11 @@ import { PAL } from './core/palette.js';
 export const MACHINES = [
   {
     id: 'shooter',
-    name: 'GHOUL SHIFT',
-    genre: 'FIRST-PERSON',
-    hint: 'WASD MOVE  MOUSE / ARROWS AIM  CLICK / SPACE SHOOT',
-    colors: { body: PAL.maroon, trim: PAL.red, dark: PAL.black },
+    name: 'BEAR IN THE RED WOODS',
+    marquee: ['BEAR IN THE', 'RED WOODS'], // two lines so it fits the cabinet
+    genre: 'FPS SURVIVAL',
+    hint: 'WASD MOVE  MOUSE AIM  CLICK FIRE  E BUY WALL GUNS  SURVIVE 3 WAVES',
+    colors: { body: PAL.brown, trim: PAL.red, dark: PAL.black },
     load: () => import('./games/shooter/index.js'),
   },
     {

@@ -1,7 +1,10 @@
 // Drawing: raycast walls, billboard sprites, the held gun, the HUD and the menu screens.
 import { W, H, PAL, FOV_SCALE, PLAYER, WEAPONS, WEAPON_ORDER, WAVES } from './config.js';
 import { tileAt, isWallTile, TREES, insideCabin } from './world.js';
-import { drawText } from './font.js';
+
+// The pixel font comes from the arcade (api.text); createGame hands it over before the first draw.
+let drawText = () => {};
+export function useText(fn) { drawText = fn; }
 
 const HORIZON = H / 2;
 const FOG = [3, 6, 10];
@@ -159,13 +162,6 @@ function bar(g, x, y, w, h, frac, color) {
   g.fillStyle = color; g.fillRect(x, y, Math.round(w * Math.max(0, Math.min(1, frac))), h);
 }
 
-function speaker(g, x, y, muted) {
-  g.fillStyle = muted ? PAL.fog : PAL.bone;
-  g.fillRect(x, y + 2, 2, 3); g.fillRect(x + 2, y + 1, 1, 5); g.fillRect(x + 3, y, 1, 7);
-  if (muted) { g.fillStyle = PAL.red; for (let i = 0; i < 5; i++) { g.fillRect(x + 5 + i, y + 1 + i, 1, 1); g.fillRect(x + 9 - i, y + 1 + i, 1, 1); } }
-  else { g.fillRect(x + 5, y + 2, 1, 3); g.fillRect(x + 7, y + 1, 1, 5); }
-}
-
 function drawHud(g, world, o) {
   const p = world.player;
   // crosshair + hit marker
@@ -180,9 +176,6 @@ function drawHud(g, world, o) {
   panel(g, 2, 2, 66, 17);
   drawText(g, `WAVE ${Math.max(1, world.wave + 1)}/${WAVES.length}`, 5, 5, PAL.bone);
   drawText(g, `ZOMBIES ${o.remaining}`, 5, 12, PAL.moss);
-  panel(g, W - 32, 2, 30, 11);
-  speaker(g, W - 29, 4, o.muted);
-  drawText(g, 'M', W - 9, 5, PAL.fog);
 
   const bear = world.bear;
   if (bear) {
@@ -266,7 +259,7 @@ const CONTROLS = [
   ['CLICK / SPACE', 'FIRE'],
   ['E', 'BUY WALL GUN'],
   ['1 2 3 / Q', 'SWITCH GUN'],
-  ['ESC / P', 'PAUSE'],
+  ['ESC', 'PAUSE / ARCADE MENU'],
   ['M', 'MUTE'],
 ];
 
@@ -277,7 +270,7 @@ function drawControls(g, x, y) {
   });
 }
 
-export function drawTitle(g, art, clock, best, muted) {
+export function drawTitle(g, art, clock, best) {
   g.drawImage(art.title, 0, 0);
   if (Math.floor(clock * 1.5) % 4 !== 0) { g.fillStyle = PAL.red; g.fillRect(214, 140, 2, 1); g.fillRect(219, 140, 2, 1); }
   drawText(g, 'BEAR IN THE', 160, 14, PAL.bone, { scale: 2, align: 'center', shadow: PAL.black });
@@ -287,30 +280,16 @@ export function drawTitle(g, art, clock, best, muted) {
   drawText(g, 'SURVIVE 3 WAVES. KILL THE BEAR.', 160, 128, PAL.bone, { align: 'center', shadow: PAL.black });
   if (Math.floor(clock * 2) % 2 === 0) drawText(g, 'PRESS ENTER OR CLICK TO START', 160, 160, PAL.gold, { align: 'center', shadow: PAL.black });
   if (best) drawText(g, `BEST ${best}`, 4, H - 8, PAL.fog);
-  speaker(g, W - 30, H - 10, muted);
-  drawText(g, 'M', W - 9, H - 9, PAL.fog);
 }
 
-export function drawPause(g, muted) {
-  g.fillStyle = PAL.black;
-  g.globalAlpha = 0.75;
-  g.fillRect(0, 0, W, H);
-  g.globalAlpha = 1;
-  drawText(g, 'PAUSED', 160, 16, PAL.gold, { scale: 3, align: 'center', shadow: PAL.night });
-  drawText(g, 'ENTER / CLICK RESUME    R RESTART    T TITLE', 160, 40, PAL.bone, { align: 'center' });
-  drawText(g, `M SOUND: ${muted ? 'OFF' : 'ON'}`, 160, 50, muted ? PAL.fog : PAL.moss, { align: 'center' });
-  drawControls(g, 96, 72);
-}
-
-export function drawEnd(g, world, won, t, best, newBest) {
+// Win/lose card. Text stays above and below the middle, where the arcade's result menu opens next.
+export function drawEnd(g, world, won, t) {
   g.fillStyle = won ? PAL.night : PAL.bloodDark;
   g.globalAlpha = Math.min(0.85, t * 1.5);
   g.fillRect(0, 0, W, H);
   g.globalAlpha = 1;
-  drawText(g, won ? 'YOU SURVIVED' : 'THE WOODS TOOK YOU', 160, 34, won ? PAL.gold : PAL.red, { scale: 3, align: 'center', shadow: PAL.black });
-  drawText(g, won ? 'THE RED BEAR IS DEAD. DAWN COMES.' : `FELL ON WAVE ${Math.max(1, world.wave + 1)} OF ${WAVES.length}`, 160, 60, PAL.bone, { align: 'center' });
-  drawText(g, `SCORE ${world.earned}`, 160, 80, PAL.gold, { scale: 2, align: 'center', shadow: PAL.black });
-  drawText(g, `KILLS ${world.kills}    TIME ${Math.floor(world.time / 60)}:${String(Math.floor(world.time % 60)).padStart(2, '0')}`, 160, 98, PAL.bone, { align: 'center' });
-  drawText(g, newBest ? 'NEW BEST!' : `BEST ${best}`, 160, 108, newBest ? PAL.ember : PAL.fog, { align: 'center' });
-  if (t > 1 && Math.floor(t * 2) % 2 === 0) drawText(g, 'ENTER / CLICK TO PLAY AGAIN    T TITLE', 160, 140, PAL.bone, { align: 'center' });
+  drawText(g, won ? 'YOU SURVIVED' : 'THE WOODS TOOK YOU', 160, 10, won ? PAL.gold : PAL.red, { scale: 3, align: 'center', shadow: PAL.black });
+  drawText(g, won ? 'THE RED BEAR IS DEAD. DAWN COMES.' : `FELL ON WAVE ${Math.max(1, world.wave + 1)} OF ${WAVES.length}`, 160, 32, PAL.bone, { align: 'center', shadow: PAL.black });
+  drawText(g, `SCORE ${world.earned}`, 160, 142, PAL.gold, { scale: 2, align: 'center', shadow: PAL.black });
+  drawText(g, `KILLS ${world.kills}    TIME ${Math.floor(world.time / 60)}:${String(Math.floor(world.time % 60)).padStart(2, '0')}`, 160, 160, PAL.bone, { align: 'center', shadow: PAL.black });
 }

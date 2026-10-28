@@ -18,6 +18,21 @@ const SOUNDS = {
   wave: [note(440, 0, 0.12, 'sawtooth', 0.1), note(330, 0.14, 0.12, 'sawtooth', 0.1), note(440, 0.28, 0.2, 'sawtooth', 0.1)],
   win: [note(523, 0), note(659, 0.1), note(784, 0.2), note(1046, 0.3, 0.35)],
   lose: [note(392, 0, 0.15, 'triangle', 0.18), note(311, 0.15, 0.15, 'triangle', 0.18), note(262, 0.3, 0.15, 'triangle', 0.18), note(196, 0.45, 0.45, 'triangle', 0.18)],
+  // Bear in the Red Woods
+  pistol: [{ type: 'noise', f: [6000, 400], d: 0.12, v: 0.3 }, { type: 'square', f: [900, 120], d: 0.07, v: 0.12 }],
+  shotgun: [{ type: 'noise', f: [3000, 80], d: 0.35, v: 0.45 }, { type: 'square', f: [220, 40], d: 0.18, v: 0.18 }],
+  smg: [{ type: 'noise', f: [7000, 900], d: 0.06, v: 0.22 }, { type: 'square', f: [1200, 300], d: 0.04, v: 0.06 }],
+  bearHit: [{ type: 'square', f: [140, 60], d: 0.1, v: 0.14 }],
+  zdie: [{ type: 'sawtooth', f: [220, 40], d: 0.35, v: 0.16 }, { type: 'noise', f: [900, 100], d: 0.25, v: 0.15 }],
+  groan: [{ type: 'sawtooth', f: [110, 70], d: 0.5, v: 0.07 }, { type: 'triangle', f: [140, 90], d: 0.5, v: 0.06, t: 0.05 }],
+  buy: [note(659, 0, 0.06), note(880, 0.06, 0.06), note(1319, 0.12, 0.18)],
+  equip: [note(660, 0, 0.04, 'square', 0.08), note(990, 0.05, 0.05, 'square', 0.08)],
+  deny: [note(160, 0, 0.12), note(120, 0.12, 0.18)],
+  clear: [note(523, 0, 0.08, 'triangle', 0.16), note(659, 0.08, 0.08, 'triangle', 0.16), note(784, 0.16, 0.2, 'triangle', 0.16)],
+  roar: [{ type: 'sawtooth', f: [95, 50], d: 0.9, v: 0.25 }, { type: 'noise', f: [700, 120], d: 0.9, v: 0.25 }, { type: 'square', f: [70, 45], d: 0.9, v: 0.1 }],
+  charge: [{ type: 'noise', f: [400, 60], d: 0.5, v: 0.35 }, { type: 'square', f: [60, 40], d: 0.5, v: 0.15 }],
+  thud: [{ type: 'noise', f: [500, 40], d: 0.4, v: 0.4 }, { type: 'sine', f: [80, 30], d: 0.4, v: 0.3 }],
+  bearDie: [{ type: 'sawtooth', f: [120, 30], d: 1.2, v: 0.25 }, { type: 'noise', f: [1200, 60], d: 1.0, v: 0.3 }],
 };
 
 export const SOUND_NAMES = Object.freeze(Object.keys(SOUNDS));

@@ -42,15 +42,18 @@ export function drawCabinet(g, x, y, w, h, machine, t, selected) {
   // Shadow on floor
   g.fillStyle = PAL.black;
   g.fillRect(x - 2, y + h - 1, w + 6, 3);
-  // Body and side shading
+  // Body and side shading, plus any per-machine body art
   g.fillStyle = c.body;
   g.fillRect(x, y, w, h);
   g.fillStyle = c.dark;
   g.fillRect(x + w - 4, y, 4, h);
-  // Marquee with the machine name
+  BODY_ART[machine.id]?.(g, x, y, w, h);
+  // Marquee with the machine name (one line, or two when machine.marquee splits a long name)
+  const lines = machine.marquee ?? [machine.name];
+  const my = lines.length > 1 ? 2 : 3;
   g.fillStyle = PAL.black;
-  g.fillRect(x + 2, y + 3, w - 8, 11);
-  drawText(g, machine.name, x + (w - 4) / 2, y + 6, selected ? PAL.yellow : c.trim, { align: 'center' });
+  g.fillRect(x + 2, y + my, w - 8, lines.length > 1 ? 14 : 11);
+  lines.forEach((line, i) => drawText(g, line, x + (w - 4) / 2, y + my + 2 + i * 6, selected ? PAL.yellow : c.trim, { align: 'center' }));
   // Screen bezel + animated attract screen
   g.fillStyle = PAL.black;
   g.fillRect(x + 4, y + 17, w - 12, 34);
@@ -71,38 +74,118 @@ export function drawCabinet(g, x, y, w, h, machine, t, selected) {
   g.fillStyle = PAL.cream;
   g.fillRect(x + 28, y + 58, 3, 2);
   g.fillRect(x + 34, y + 58, 3, 2);
-  // Coin door
-  g.fillStyle = c.dark;
-  g.fillRect(x + 17, y + 70, 16, 15);
-  g.fillStyle = PAL.yellow;
-  g.fillRect(x + 21, y + 74, 1, 5);
-  g.fillRect(x + 28, y + 74, 1, 5);
+  // Coin door (or a machine's own kick panel)
+  if (KICK_PANELS[machine.id]) KICK_PANELS[machine.id](g, x, y);
+  else {
+    g.fillStyle = c.dark;
+    g.fillRect(x + 17, y + 70, 16, 15);
+    g.fillStyle = PAL.yellow;
+    g.fillRect(x + 21, y + 74, 1, 5);
+    g.fillRect(x + 28, y + 74, 1, 5);
+  }
   // Base
   g.fillStyle = PAL.black;
   g.fillRect(x, y + h - 3, w, 3);
 }
 
+// ---- Bear in the Red Woods cabinet pieces ----
+
+// Side-view bear, 14x8, facing right.
+const BEAR = [
+  '.....##.......',
+  '...######..#..',
+  '..##########..',
+  '.############.',
+  '.#############',
+  '.###########..',
+  '.##.##..##.##.',
+  '.##.##..##.##.',
+];
+
+function bearSilhouette(g, x, y, color, faceLeft = false) {
+  g.fillStyle = color;
+  BEAR.forEach((row, r) => {
+    for (let i = 0; i < row.length; i++) if (row[i] === '#') g.fillRect(x + (faceLeft ? row.length - 1 - i : i), y + r, 1, 1);
+  });
+}
+
+function pine(g, cx, top, height, color) {
+  g.fillStyle = color;
+  for (let i = 0; i < height; i++) {
+    const half = Math.floor(i / 2);
+    g.fillRect(cx - half, top + i, half * 2 + 1, 1);
+  }
+  g.fillRect(cx, top + height, 1, 2);
+}
+
+function disc(g, cx, cy, r, color) {
+  g.fillStyle = color;
+  for (let dy = -r; dy <= r; dy++) {
+    const half = Math.floor(Math.sqrt(r * r - dy * dy));
+    g.fillRect(cx - half, cy + dy, half * 2 + 1, 1);
+  }
+}
+
+const BODY_ART = {
+  // Log-cabin walls with dark pines growing up the lower body.
+  shooter(g, x, y, w, h) {
+    for (let ly = y + 6; ly < y + h - 3; ly += 5) {
+      g.fillStyle = PAL.black;
+      g.fillRect(x, ly, w - 4, 1);
+      g.fillStyle = PAL.maroon;
+      g.fillRect(x, ly + 1, w - 4, 1);
+    }
+    pine(g, x + 6, y + 68, 15, PAL.black);
+    pine(g, x + 12, y + 74, 9, PAL.forest);
+    pine(g, x + 40, y + 72, 11, PAL.forest);
+    pine(g, x + 46, y + 67, 16, PAL.black);
+  },
+};
+
+const KICK_PANELS = {
+  // A bear prowling in front of a red moon.
+  shooter(g, x, y) {
+    g.fillStyle = PAL.black;
+    g.fillRect(x + 17, y + 69, 17, 17);
+    disc(g, x + 25, y + 76, 6, PAL.red);
+    bearSilhouette(g, x + 19, y + 77, PAL.black);
+    g.fillStyle = PAL.red;
+    g.fillRect(x + 31, y + 80, 1, 1); // eye
+    g.fillStyle = PAL.maroon;
+    g.fillRect(x + 17, y + 85, 17, 1);
+  },
+};
+
 const SCREENS = {
   shooter(g, x, y, w, h, t) {
+    // Night over the red woods
     g.fillStyle = PAL.black;
     g.fillRect(x, y, w, h);
-    // Corridor: ceiling, floor and receding wall bands
+    g.fillStyle = PAL.night;
+    g.fillRect(x, y + 9, w, 10);
+    disc(g, x + w - 8, y + 6, 3, PAL.red);
+    for (let i = 0; i < 7; i++) pine(g, x + 2 + i * 6, y + 8 + ((i * 5) % 4), 9, i % 2 ? PAL.forest : PAL.indigo);
     g.fillStyle = PAL.maroon;
-    g.fillRect(x, y + h / 2, w, h / 2);
-    for (let i = 0; i < 4; i++) {
-      const inset = i * 4;
-      g.fillStyle = i % 2 ? PAL.grey : PAL.indigo;
-      g.fillRect(x + inset, y + 4 + inset / 2, 3, h - 8 - inset);
-      g.fillRect(x + w - 3 - inset, y + 4 + inset / 2, 3, h - 8 - inset);
-    }
-    // Ghoul shambling closer
-    const s = 1 + ((t * 0.6) % 1);
-    const gx = x + w / 2 - 3 * s, gy = y + h / 2 - 4 * s;
-    g.fillStyle = PAL.green;
-    g.fillRect(gx, gy, 6 * s, 9 * s);
+    g.fillRect(x, y + h - 8, w, 8);
+    // Log cabin with a lit window
+    g.fillStyle = PAL.brown;
+    g.fillRect(x + 3, y + h - 15, 12, 8);
+    g.fillStyle = PAL.black;
+    for (let i = 0; i < 4; i++) g.fillRect(x + 2 + i, y + h - 16 - i, 14 - i * 2, 1);
+    g.fillRect(x + 3, y + h - 12, 12, 1);
+    g.fillStyle = PAL.yellow;
+    g.fillRect(x + 5, y + h - 14, 3, 2);
+    // The bear prowls across the clearing and rears up with a red "!" before it charges
+    const k = (t * 0.22) % 1;
+    const rearing = k > 0.45 && k < 0.6;
+    const bx = Math.round(x + w + 2 - Math.min(k, 0.45) * (w + 6) - Math.max(0, k - 0.6) * (w + 6));
+    bearSilhouette(g, bx, y + h - 11, PAL.black, true);
     g.fillStyle = PAL.red;
-    g.fillRect(gx + 1 * s, gy + 2 * s, s, s);
-    g.fillRect(gx + 4 * s, gy + 2 * s, s, s);
+    g.fillRect(bx + 2, y + h - 8, 1, 1); // eye
+    if (rearing && Math.sin(t * 20) > -0.2) {
+      g.fillRect(bx + 3, y + h - 19, 1, 3);
+      g.fillRect(bx + 3, y + h - 15, 1, 1);
+    }
     // Blinking crosshair
     if (Math.sin(t * 6) > -0.3) {
       g.fillStyle = PAL.cream;
