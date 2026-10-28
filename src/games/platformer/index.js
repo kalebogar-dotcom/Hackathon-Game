@@ -1,226 +1,216 @@
-// PEBBLE JUMP — 2D platformer. Run, jump, grab coins, dodge spikes and reach the flag.
-import { LEVEL, TILE as T, START_LIVES } from './level.js';
-import { moveBody, isGrounded, overlaps } from './physics.js';
-import { buildSprites, drawSky, drawTile } from './sprites.js';
+// PIXEL CHIC (Machine #2): retro dress-up studio. Phase 1 = character select + basic studio.
+import { SKINS, EYE_COLORS, HAIR_COLORS, CLOTH_COLORS, HAIR, SLOT_ITEMS, PRESETS, DEFAULT_LOOKS } from './items.js';
+import { drawLook } from './sprites.js';
 
-const GRAVITY = 900;        // px/s²
-const MAX_FALL = 360;
-const RUN_SPEED = 85;
-const ACCEL_GROUND = 900;
-const ACCEL_AIR = 600;
-const FRICTION = 1100;
-const JUMP_SPEED = 300;     // peak ≈ 5 tiles
-const JUMP_CUT = 0.45;      // releasing jump early cuts upward speed to this fraction
-const COYOTE_TIME = 0.08;   // can still jump just after leaving a ledge
-const JUMP_BUFFER = 0.12;   // jump pressed just before landing still counts
-const RESPAWN_DELAY = 0.9;
-const JUMP_KEYS = ['Space', 'KeyW', 'ArrowUp', 'KeyK'];
-const BEETLE_SPEED = 22;
-const STOMP_BOUNCE = 220;
-const STOMP_POINTS = 25;
+const SLOTS = ['top', 'bottom', 'dress', 'outer', 'shoes', 'acc'];
+const POP_TIME = 0.18;
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const wrap = (i, n, d) => (i + d + n) % n;
+const itemOf = (slot, id) => SLOT_ITEMS[slot].find((i) => i.id === id);
 
 export function createGame(api) {
-  const { W, H, palette: P, input, audio } = api;
-  const art = buildSprites(api);
-  const tiles = LEVEL.map(row => row.split(''));
-  const cols = tiles[0].length;
-  const rows = tiles.length;
-  const levelW = cols * T;
+  const { palette: pal, input, audio } = api;
+  const mouse = input.mouse;
+  const rc = (c) => (c[0] === '#' ? c : pal[c]);
 
-  let start = { x: 1, y: rows - 3 };
-  let flag = null;
-  let totalCoins = 0;
-  const beetles = [];
-  tiles.forEach((row, y) => row.forEach((c, x) => {
-    if (c === 'P') { start = { x, y }; row[x] = '.'; }
-    else if (c === 'e') { beetles.push({ x: x * T + 1, y: y * T + T - 6, w: 8, h: 6, vx: -BEETLE_SPEED, alive: true, squash: 0 }); row[x] = '.'; }
-    else if (c === 'F') flag = { x: x * T + 2, y: (y - 6) * T, w: 6, h: 7 * T };
-    else if (c === 'o') totalCoins++;
-  }));
+  // saved per character, so switching never loses an outfit
+  const looks = { girl: clone(DEFAULT_LOOKS.girl), boy: clone(DEFAULT_LOOKS.boy) };
+  let who = 'girl';
+  let screen = 'select';
+  let sel = 0;
+  let cat = 0;
+  let lastPreset = -1;
+  let t = 0, blinkIn = 2.5, blinking = 0, pop = 0;
+  const sparks = [];
+  const cur = () => looks[who];
 
-  const solid = (col, row) => {
-    if (col < 0 || col >= cols) return true;
-    if (row < 0 || row >= rows) return false;
-    const c = tiles[row][col];
-    return c === '#' || c === '=';
+  function spawn(n) {
+    const cs = [pal.yellow, pal.cream, pal.sky];
+    for (let i = 0; i < n; i++) {
+      sparks.push({ x: 38 + Math.random() * 72, y: 26 + Math.random() * 120, life: 0.5 + Math.random() * 0.5, c: cs[i % 3] });
+    }
+  }
+  function changed() { pop = POP_TIME; spawn(8); audio.play('coin'); }
+
+  const slotCat = (name, slot) => {
+    const opts = [null, ...SLOT_ITEMS[slot]];
+    return {
+      name, slot,
+      label: (l) => (l[slot] ? itemOf(slot, l[slot].id).name : 'NONE'),
+      swatch: (l) => (l[slot] ? l[slot].c : null),
+      step: (l, d) => {
+        const at = opts.findIndex((o) => (o ? (l[slot] && l[slot].id === o.id) : !l[slot]));
+        const next = opts[wrap(at < 0 ? 0 : at, opts.length, d)];
+        l[slot] = next ? { id: next.id, c: next.c1 } : null;
+      },
+    };
   };
 
-  const player = { x: 0, y: 0, w: 8, h: 9, vx: 0, vy: 0, facing: 1 };
-  let coins = 0;
-  let stomps = 0;
-  let lives = START_LIVES;
-  let coyote = 0, buffer = 0, dead = 0, invuln = 0, time = 0, camX = 0;
-  let over = false;
-
-  function respawn() {
-    player.x = start.x * T + 1;
-    player.y = start.y * T + (T - player.h);
-    player.vx = player.vy = 0;
-    player.facing = 1;
-    invuln = 1;
-  }
-  respawn();
-
-  function die() {
-    lives--;
-    audio.play('hurt');
-    if (lives <= 0) {
-      over = true;
-      api.finish({ won: false, score: coins * 10 + stomps * STOMP_POINTS });
-      return;
-    }
-    dead = RESPAWN_DELAY;
-  }
-
-  // Beetles patrol, turning at walls, spikes and ledges.
-  function updateBeetles(dt) {
-    for (const b of beetles) {
-      if (!b.alive) { b.squash = Math.max(0, b.squash - dt); continue; }
-      const nx = b.x + b.vx * dt;
-      const frontCol = Math.floor((b.vx < 0 ? nx : nx + b.w) / T);
-      const row = Math.floor((b.y + b.h - 1) / T);
-      const blocked = solid(frontCol, row) || tiles[row]?.[frontCol] === '^' || !solid(frontCol, row + 1);
-      if (blocked) b.vx = -b.vx;
-      else b.x = nx;
-    }
-  }
-
-  // Landing on a beetle stomps it; any other touch hurts.
-  function touchBeetles() {
-    for (const b of beetles) {
-      if (!b.alive || !overlaps(player, b)) continue;
-      if (player.vy > 0 && player.y + player.h - b.y < 8) {
-        b.alive = false;
-        b.squash = 0.5;
-        stomps++;
-        player.vy = -STOMP_BOUNCE;
-        audio.play('hit');
-      } else if (invuln <= 0) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function touchTiles() {
-    const c0 = Math.floor(player.x / T), c1 = Math.floor((player.x + player.w - 0.01) / T);
-    const r0 = Math.floor(player.y / T), r1 = Math.floor((player.y + player.h - 0.01) / T);
-    for (let r = Math.max(0, r0); r <= Math.min(rows - 1, r1); r++) {
-      for (let c = Math.max(0, c0); c <= Math.min(cols - 1, c1); c++) {
-        const ch = tiles[r][c];
-        if (ch === 'o' && overlaps(player, { x: c * T + 2, y: r * T + 2, w: 6, h: 6 })) {
-          tiles[r][c] = '.';
-          coins++;
-          audio.play('coin');
-        } else if (ch === '^' && overlaps(player, { x: c * T + 1, y: r * T + 5, w: 8, h: 5 })) {
-          return 'spike';
+  const CATS = [
+    { name: 'HAIR',
+      label: (l) => (HAIR.find((h) => h.id === l.hair) || HAIR[0]).name,
+      swatch: () => null,
+      step: (l, d) => {
+        const at = Math.max(0, HAIR.findIndex((h) => h.id === l.hair));
+        l.hair = HAIR[wrap(at, HAIR.length, d)].id;
+      } },
+    { name: 'HAIR COLOR', label: (l) => HAIR_COLORS[l.hairColor].name, swatch: (l) => HAIR_COLORS[l.hairColor].c,
+      step: (l, d) => { l.hairColor = wrap(l.hairColor, HAIR_COLORS.length, d); } },
+    { name: 'SKIN', label: (l) => SKINS[l.skin].name, swatch: (l) => SKINS[l.skin].c,
+      step: (l, d) => { l.skin = wrap(l.skin, SKINS.length, d); } },
+    { name: 'EYES', label: (l) => EYE_COLORS[l.eyes].name, swatch: (l) => EYE_COLORS[l.eyes].c,
+      step: (l, d) => { l.eyes = wrap(l.eyes, EYE_COLORS.length, d); } },
+    slotCat('TOP', 'top'), slotCat('BOTTOM', 'bottom'), slotCat('DRESS', 'dress'),
+    slotCat('JACKET', 'outer'), slotCat('SHOES', 'shoes'), slotCat('EXTRA', 'acc'),
+    { name: 'PRESETS',
+      label: () => (lastPreset < 0 ? 'PICK ONE' : PRESETS[lastPreset].name),
+      swatch: () => null,
+      step: (l, d) => {
+        lastPreset = lastPreset < 0 ? (d > 0 ? 0 : PRESETS.length - 1) : wrap(lastPreset, PRESETS.length, d);
+        const p = PRESETS[lastPreset];
+        for (const slot of SLOTS) {
+          const e = p.items[slot];
+          l[slot] = e ? { id: e[0], c: e[1] } : null;
         }
-      }
+      } },
+  ];
+
+  function stepCat(d) { CATS[cat].step(cur(), d); changed(); }
+  function cycleColor() {
+    const slot = CATS[cat].slot;
+    const piece = slot && cur()[slot];
+    if (!piece) return;
+    piece.c = CLOTH_COLORS[wrap(Math.max(0, CLOTH_COLORS.indexOf(piece.c)), CLOTH_COLORS.length, 1)];
+    changed();
+  }
+  function swap() { who = who === 'girl' ? 'boy' : 'girl'; changed(); audio.play('select'); }
+  function done() {
+    const n = SLOTS.filter((s) => cur()[s]).length;
+    api.finish({ won: true, score: 100 + n * 10 });
+  }
+  function startStudio() { who = sel ? 'boy' : 'girl'; screen = 'studio'; audio.play('select'); spawn(14); }
+
+  function studioClick() {
+    const { x, y } = mouse;
+    if (y >= 152 && y < 164) {
+      if (x >= 148 && x < 188) return swap();
+      if (x >= 192 && x < 232) return cycleColor();
+      if (x >= 264 && x < 312) return done();
     }
-    return null;
+    if (x >= 146 && y >= 15 && y < 15 + CATS.length * 12) {
+      const row = Math.floor((y - 15) / 12);
+      if (row !== cat) { cat = row; audio.play('blip'); }
+      if (x >= 210 && x < 230) stepCat(-1);
+      else if (x >= 286 && x < 306) stepCat(1);
+    }
+    return undefined;
   }
 
-  return {
-    update(dt) {
-      if (over) return;
-      time += dt;
-      updateBeetles(dt);
-      if (dead > 0) {
-        dead -= dt;
-        if (dead <= 0) respawn();
-        return;
+  function update(dt) {
+    t += dt;
+    blinkIn -= dt;
+    if (blinkIn <= 0) { blinking = 0.12; blinkIn = 2 + Math.random() * 2.5; }
+    if (blinking > 0) blinking -= dt;
+    pop = Math.max(0, pop - dt);
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      sparks[i].life -= dt; sparks[i].y -= dt * 12;
+      if (sparks[i].life <= 0) sparks.splice(i, 1);
+    }
+    if (t < 0.25) return; // ignore the keypress that entered the machine
+    const click = mouse.pressed && !(mouse.x >= 276 && mouse.y < 12); // top-right belongs to ESC MENU
+
+    if (screen === 'select') {
+      if (input.wasPressed('ArrowLeft', 'KeyA')) { sel = 0; audio.play('blip'); }
+      if (input.wasPressed('ArrowRight', 'KeyD')) { sel = 1; audio.play('blip'); }
+      if (click) { sel = mouse.x < 160 ? 0 : 1; startStudio(); }
+      else if (input.wasPressed('Enter', 'Space')) startStudio();
+    } else {
+      if (Math.random() < dt * 2) spawn(1);
+      if (input.wasPressed('ArrowUp', 'KeyW')) { cat = wrap(cat, CATS.length, -1); audio.play('blip'); }
+      if (input.wasPressed('ArrowDown', 'KeyS')) { cat = wrap(cat, CATS.length, 1); audio.play('blip'); }
+      if (input.wasPressed('ArrowLeft', 'KeyA')) stepCat(-1);
+      if (input.wasPressed('ArrowRight', 'KeyD')) stepCat(1);
+      if (input.wasPressed('KeyC')) cycleColor();
+      if (input.wasPressed('KeyX')) swap();
+      if (click) studioClick();
+      if (input.wasPressed('Enter')) done();
+    }
+  }
+
+  function arrow(g, x, y, dir, c) {
+    g.fillStyle = c;
+    if (dir < 0) { g.fillRect(x + 2, y, 1, 5); g.fillRect(x + 1, y + 1, 1, 3); g.fillRect(x, y + 2, 1, 1); }
+    else { g.fillRect(x, y, 1, 5); g.fillRect(x + 1, y + 1, 1, 3); g.fillRect(x + 2, y + 2, 1, 1); }
+  }
+  function button(g, x, y, w, label) {
+    g.fillStyle = pal.blue; g.fillRect(x, y, w, 12);
+    api.text(g, label, x + w / 2, y + 4, pal.cream, { align: 'center' });
+  }
+  function drawSparks(g) {
+    for (const s of sparks) {
+      const x = Math.round(s.x), y = Math.round(s.y);
+      g.fillStyle = s.c; g.fillRect(x, y, 1, 1);
+      if (s.life > 0.25) { g.fillRect(x - 1, y, 1, 1); g.fillRect(x + 1, y, 1, 1); g.fillRect(x, y - 1, 1, 1); g.fillRect(x, y + 1, 1, 1); }
+    }
+  }
+
+  function drawSelect(g) {
+    g.fillStyle = pal.indigo; g.fillRect(0, 0, 320, 180);
+    g.fillStyle = pal.violet; g.fillRect(0, 132, 320, 48);
+    api.text(g, 'PIXEL CHIC', 160, 8, pal.yellow, { scale: 2, align: 'center', shadow: pal.black });
+    api.text(g, 'PICK YOUR STYLE', 160, 26, pal.cream, { align: 'center' });
+    [['girl', 80, 'GIRL'], ['boy', 240, 'BOY']].forEach(([key, cx, label], i) => {
+      const bob = Math.sin(t * 3 + i) > 0.3 ? 1 : 0;
+      drawLook(g, pal, looks[key], cx - 24, 36 + bob, 3, blinking > 0);
+      if (sel === i) {
+        g.fillStyle = pal.yellow;
+        g.fillRect(cx - 34, 30, 68, 1); g.fillRect(cx - 34, 138, 68, 1);
+        g.fillRect(cx - 34, 30, 1, 109); g.fillRect(cx + 33, 30, 1, 109);
       }
-      invuln = Math.max(0, invuln - dt);
+      api.text(g, label, cx, 146, sel === i ? pal.yellow : pal.cream, { scale: 2, align: 'center', shadow: pal.black });
+    });
+    api.text(g, 'LEFT RIGHT CHOOSE  ENTER OR CLICK START', 160, 168, pal.cream, { align: 'center' });
+  }
 
-      const dir = (input.isDown('ArrowRight', 'KeyD') ? 1 : 0) - (input.isDown('ArrowLeft', 'KeyA') ? 1 : 0);
-      const grounded = isGrounded(player, solid, T) && player.vy >= 0;
-      coyote = grounded ? COYOTE_TIME : coyote - dt;
-      buffer = input.wasPressed(...JUMP_KEYS) ? JUMP_BUFFER : buffer - dt;
+  function drawStudio(g) {
+    // dressing room
+    g.fillStyle = pal.indigo; g.fillRect(0, 0, 144, 180);
+    g.fillStyle = pal.night; for (let x = 8; x < 144; x += 16) g.fillRect(x, 0, 2, 150);
+    g.fillStyle = pal.violet; g.fillRect(0, 150, 144, 30);
+    g.fillStyle = pal.night; g.fillRect(38, 149, 72, 3);
+    const hop = pop > 0 ? Math.round(Math.sin((1 - pop / POP_TIME) * Math.PI) * 5) : 0;
+    const bob = Math.sin(t * 3) > 0.3 ? 1 : 0;
+    drawLook(g, pal, cur(), 42, 22 + bob - hop, 4, blinking > 0);
+    drawSparks(g);
+    api.text(g, 'PIXEL CHIC', 6, 6, pal.yellow, { shadow: pal.black });
+    api.text(g, who.toUpperCase() + ' STYLE', 74, 160, pal.cream, { align: 'center' });
 
-      // Horizontal: accelerate toward target speed, with friction when idle on ground
-      const target = dir * RUN_SPEED;
-      const accel = dir ? (grounded ? ACCEL_GROUND : ACCEL_AIR) : (grounded ? FRICTION : ACCEL_AIR * 0.3);
-      if (player.vx < target) player.vx = Math.min(target, player.vx + accel * dt);
-      else if (player.vx > target) player.vx = Math.max(target, player.vx - accel * dt);
-      if (dir) player.facing = dir;
+    // options panel
+    g.fillStyle = pal.night; g.fillRect(144, 0, 176, 180);
+    g.fillStyle = pal.blue; g.fillRect(144, 0, 1, 180);
+    const look = cur();
+    CATS.forEach((c, i) => {
+      const y = 16 + i * 12;
+      const on = i === cat;
+      if (on) { g.fillStyle = pal.indigo; g.fillRect(146, y - 1, 172, 11); }
+      api.text(g, c.name, 150, y, on ? pal.yellow : pal.grey);
+      api.text(g, c.label(look), 258, y, on ? pal.cream : pal.grey, { align: 'center' });
+      if (on) { arrow(g, 216, y, -1, pal.yellow); arrow(g, 292, y, 1, pal.yellow); }
+      const sw = c.swatch(look);
+      if (sw) { g.fillStyle = rc(sw); g.fillRect(304, y, 6, 5); }
+    });
+    button(g, 148, 152, 40, 'SWAP X');
+    button(g, 192, 152, 40, 'COLOR C');
+    button(g, 264, 152, 48, 'DONE');
+    api.text(g, 'UP DOWN PICK  LEFT RIGHT CHANGE', 232, 168, pal.grey, { align: 'center' });
+    api.text(g, 'C COLOR  X SWAP  ENTER DONE', 232, 174, pal.grey, { align: 'center' });
+  }
 
-      // Jump (buffered + coyote) and variable height
-      if (buffer > 0 && coyote > 0) {
-        player.vy = -JUMP_SPEED;
-        buffer = coyote = 0;
-        audio.play('jump');
-      }
-      if (!input.isDown(...JUMP_KEYS) && player.vy < -JUMP_SPEED * JUMP_CUT) player.vy = -JUMP_SPEED * JUMP_CUT;
-      player.vy = Math.min(MAX_FALL, player.vy + GRAVITY * dt);
+  function draw(g) { if (screen === 'select') drawSelect(g); else drawStudio(g); }
 
-      const hit = moveBody(player, player.vx * dt, player.vy * dt, solid, T);
-      if (hit.hitX) player.vx = 0;
-      if (hit.hitY) player.vy = 0;
+  function debug() {
+    return { screen, who, category: CATS[cat].name, equipped: SLOTS.filter((s) => cur()[s]).length, look: clone(cur()) };
+  }
 
-      if (touchTiles() === 'spike' || touchBeetles() || player.y > rows * T + 12) { die(); return; }
-      if (flag && overlaps(player, flag)) {
-        over = true;
-        api.finish({ won: true, score: coins * 10 + stomps * STOMP_POINTS + lives * 50 });
-        return;
-      }
-
-      camX = Math.max(0, Math.min(levelW - W, player.x + player.w / 2 - W * 0.4));
-    },
-
-    draw(g) {
-      const cx = Math.round(camX);
-      drawSky(g, P, W, H, cx, time);
-      const c0 = Math.max(0, Math.floor(cx / T) - 1);
-      const c1 = Math.min(cols - 1, Math.ceil((cx + W) / T) + 2); // +2 keeps the flag visible as it nears
-      for (let r = 0; r < rows; r++) {
-        for (let c = c0; c <= c1; c++) {
-          const ch = tiles[r][c];
-          if (ch !== '.') drawTile(g, P, ch, c * T - cx, r * T, T, tiles[r - 1]?.[c], time);
-        }
-      }
-
-      for (const b of beetles) {
-        const bx = Math.round(b.x - 1 - cx);
-        if (bx < -12 || bx > W) continue;
-        if (b.alive) {
-          g.drawImage(b.vx < 0 ? art.beetleLeft : art.beetleRight, bx, Math.round(b.y));
-        } else if (b.squash > 0) {
-          g.fillStyle = P.violet;
-          g.fillRect(bx, Math.round(b.y + b.h - 2), 10, 2);
-        }
-      }
-
-      if (dead <= 0 && !(invuln > 0 && Math.floor(time * 12) % 2)) {
-        const sprite = player.facing < 0 ? art.pebbleLeft : art.pebbleRight;
-        g.drawImage(sprite, Math.round(player.x - 1 - cx), Math.round(player.y - 1));
-      }
-
-      // HUD
-      g.fillStyle = P.black;
-      g.fillRect(2, 2, 92, 9);
-      g.fillStyle = P.yellow;
-      g.fillRect(5, 4, 3, 5);
-      api.text(g, `${coins}/${totalCoins}`, 11, 4, P.cream);
-      api.text(g, 'LIVES', 42, 4, P.cream);
-      for (let i = 0; i < START_LIVES; i++) {
-        g.fillStyle = i < lives ? P.red : P.night;
-        g.fillRect(64 + i * 8, 4, 5, 5);
-      }
-      if (time < 4 && dead <= 0) {
-        api.text(g, 'A D / ARROWS RUN    SPACE / W JUMP', W / 2, 24, P.night, { align: 'center' });
-      }
-      if (dead > 0) api.text(g, 'OUCH!', W / 2, H / 2 - 20, P.red, { scale: 2, align: 'center', shadow: P.black });
-    },
-
-    destroy() {},
-
-    debug() {
-      return {
-        player: { x: player.x, y: player.y, vx: player.vx, vy: player.vy },
-        grounded: isGrounded(player, solid, T),
-        enemies: beetles.map(b => ({ x: b.x, y: b.y, alive: b.alive })),
-        coins, totalCoins, stomps, lives, dead, over,
-      };
-    },
-  };
+  return { update, draw, debug };
 }
