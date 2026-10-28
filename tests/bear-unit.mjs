@@ -1,9 +1,9 @@
 // Bear in the Red Woods unit checks: the real shooter modules run headless against a stub arcade api
 // with a seeded RNG. Covers map, purchases, weapons, navigation, the bear's charge and the finish handoff.
 // Usage: node tests/bear-unit.mjs   (also part of `npm test`)
-import { createGame, tryBuy, traceShot, makeZombie, makeBear } from '../src/games/shooter/index.js';
-import { MAP, MAP_W, MAP_H, WALL_BUYS, findTiles, isWallTile, isWalkableTile, createNav, insideCabin } from '../src/games/shooter/world.js';
-import { WEAPONS, BEAR } from '../src/games/shooter/config.js';
+import { createGame, tryBuy, traceShot, makeZombie, makeBear, findBuyNear, findRepairNear, windowBlocked } from '../src/games/shooter/index.js';
+import { MAP, MAP_W, MAP_H, WALL_BUYS, WINDOWS, findTiles, isWallTile, isWall, isWalkableTile, createNav, insideCabin } from '../src/games/shooter/world.js';
+import { WEAPONS, BEAR, BARRICADE } from '../src/games/shooter/config.js';
 
 let seed = 12345;
 Math.random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
@@ -177,6 +177,153 @@ check('map is rectangular with a solid border', MAP.every(r => r.length === MAP_
   check('debug() reports the bear for the health bar', h.game.debug().bear?.maxHp === BEAR.hp);
 }
 
+// ---- barricades: map, collision, navigation ----
+const north = () => WINDOWS.find(w => w.axis === 'x');
+{
+  const h = headless();
+  h.game.start();
+  const w = h.game.world;
+  check('two barricaded windows, both start full', WINDOWS.length === 2 && w.barricades.every(b => b.boards === BARRICADE.boards));
+  const nav = createNav();
+  nav.update(12.5, 7.5);
+  check('window tiles stay on the nav graph', WINDOWS.every(win => isWalkableTile(win.x, win.y) && nav.distanceAt(win.x, win.y) > 0));
+  const b = w.barricades[0];
+  const solidWithBoards = isWall(b.cx, b.cy);
+  b.boards = 0;
+  check('boards block bodies; an empty window does not', solidWithBoards && !isWall(b.cx, b.cy));
+  check('shots pass through boards (rays ignore barricades)', !isWallTile(b.x, b.y));
+}
+
+// ---- barricades: a zombie tears in through the north window ----
+{
+  const h = headless();
+  h.game.start();
+  const w = h.game.world;
+  w.director = false;
+  const win = north();
+  const b = w.barricades.find(x => x.x === win.x && x.y === win.y);
+  Object.assign(w.player, { x: win.cx, y: win.cy + 2.6, god: true }); // inside the cabin, beyond attack reach of the window
+  const z = makeZombie(win.cx, win.cy - 2.5, 0);
+  w.enemies.push(z);
+  const boardLog = [];
+  let throughBoards = false, inWall = false, enteredAt = -1, firstTearAt = -1;
+  h.step(25, () => {
+    if (boardLog.at(-1) !== b.boards) boardLog.push(b.boards);
+    if (firstTearAt < 0 && b.boards < BARRICADE.boards) firstTearAt = w.time;
+    if (b.boards > 0 && Math.floor(z.x) === b.x && Math.floor(z.y) === b.y) throughBoards = true;
+    if (wallAt(z)) inWall = true;
+    if (enteredAt < 0 && insideCabin(z.x, z.y)) enteredAt = w.time;
+  });
+  check('zombie tears boards off one at a time', boardLog.join(',') === '5,4,3,2,1,0', boardLog.join(','));
+  check('zombie never occupies a boarded window', !throughBoards);
+  check('zombie never enters a wall tile', !inWall);
+  check('zombie gets in only after the last board', enteredAt > 0 && enteredAt >= firstTearAt + (BARRICADE.boards - 1) * BARRICADE.breakEvery - 0.1,
+    `first tear ${firstTearAt.toFixed(1)}s, inside ${enteredAt.toFixed(1)}s`);
+  check('tearing plays the board-break sound', h.sounds.filter(s => s === 'boardBreak').length === BARRICADE.boards);
+}
+
+// ---- barricades: holding E repairs one board at a time, with a capped reward ----
+{
+  const h = headless();
+  h.game.start();
+  const w = h.game.world;
+  w.director = false;
+  const win = north();
+  const b = w.barricades.find(x => x.x === win.x && x.y === win.y);
+  Object.assign(w.player, { x: win.cx, y: win.cy + 0.95 });
+  b.boards = 2;
+  check('repair target found inside range, gun not in range', findRepairNear(w) === b && !findBuyNear(w.player));
+  h.tap('KeyE'); h.hold('KeyE');
+  h.step(BARRICADE.repairTime * 0.5);
+  check('half a repair adds no board yet', b.boards === 2 && w.repair.progress > 0.4);
+  h.step(BARRICADE.repairTime * 0.55);
+  check('one board after repairTime, +repairPoints', b.boards === 3 && w.points === BARRICADE.repairPoints, `boards=${b.boards} pts=${w.points}`);
+  h.step(BARRICADE.repairTime * 4);
+  check('holding keeps repairing up to full, then stops', b.boards === BARRICADE.boards && w.repairs === 3);
+  h.hold('KeyE', false); h.step(0.1);
+
+  b.boards = 0; b.rewarded = 0; w.points = 0;
+  h.tap('KeyE'); h.hold('KeyE'); h.step(BARRICADE.repairTime * 5.5); h.hold('KeyE', false); h.step(0.1);
+  b.boards = 0;
+  h.tap('KeyE'); h.hold('KeyE'); h.step(BARRICADE.repairTime * 5.5); h.hold('KeyE', false); h.step(0.1);
+  check('reward capped per window per wave', b.boards === BARRICADE.boards && w.points === BARRICADE.rewardCapPerWave, `pts=${w.points}`);
+
+  // releasing E mid-board loses that board's progress
+  b.boards = 3;
+  h.tap('KeyE'); h.hold('KeyE'); h.step(BARRICADE.repairTime * 0.6); h.hold('KeyE', false); h.step(0.05);
+  h.tap('KeyE'); h.hold('KeyE'); h.step(BARRICADE.repairTime * 0.6); h.hold('KeyE', false); h.step(0.05);
+  check('releasing E cancels the board in progress', b.boards === 3);
+
+  // the cap resets when the next wave starts
+  w.director = true; w.phase = 'intermission'; w.phaseTime = 0.01;
+  h.step(0.05);
+  check('repair reward cap resets when a wave starts', b.rewarded === 0 && w.wave === 0);
+}
+
+// ---- barricades: E needs a fresh press at the window; wall guns win when both are in range ----
+{
+  const h = headless();
+  h.game.start();
+  const w = h.game.world;
+  w.director = false;
+  const win = north();
+  const b = w.barricades.find(x => x.x === win.x && x.y === win.y);
+  b.boards = 1;
+  Object.assign(w.player, { x: 12.5, y: 8.5 }); // inside, near nothing
+  h.tap('KeyE'); h.hold('KeyE'); h.step(0.1);
+  Object.assign(w.player, { x: win.cx, y: win.cy + 0.95 }); // walk up while still holding
+  h.step(BARRICADE.repairTime * 2);
+  check('an E held from elsewhere does not start a repair', b.boards === 1);
+  h.hold('KeyE', false); h.step(0.05);
+
+  const smg = WALL_BUYS.find(x => x.weapon === 'smg');
+  Object.assign(w.player, { x: 12.5, y: 5.1 });
+  check('test spot is in range of both the SMG and the window', findBuyNear(w.player) === smg && Math.hypot(12.5 - b.cx, 5.1 - b.cy) <= BARRICADE.repairRange);
+  w.points = 1000; b.boards = 2;
+  const pts0 = w.points;
+  h.tap('KeyE'); h.hold('KeyE'); h.step(BARRICADE.repairTime * 3); h.hold('KeyE', false); h.step(0.05);
+  check('one E press at both buys the gun and repairs nothing', w.player.owned.has('smg') && w.points === pts0 - WEAPONS.smg.price && b.boards === 2 && w.repairs === 0,
+    `owned=${[...w.player.owned]} pts=${w.points} boards=${b.boards}`);
+
+  // a body standing in an empty opening blocks the repair
+  b.boards = 0;
+  Object.assign(w.player, { x: b.cx, y: b.cy });
+  h.tap('KeyE'); h.hold('KeyE'); h.step(BARRICADE.repairTime * 2); h.hold('KeyE', false); h.step(0.05);
+  check('cannot board up a window someone is standing in', b.boards === 0 && windowBlocked(w, b));
+}
+
+// ---- barricades: two zombies at one window do not jam (regression: found by the god-mode run) ----
+{
+  const h = headless();
+  h.game.start();
+  const w = h.game.world;
+  w.director = false;
+  for (const b of w.barricades) b.boards = 0;
+  Object.assign(w.player, { x: 15.76, y: 5.22, god: true });
+  const zs = [makeZombie(17.28, 7.22, 0), makeZombie(17.28, 7.78, 0)];
+  w.enemies.push(...zs);
+  let bothInAt = -1;
+  h.step(12, () => { if (bothInAt < 0 && zs.every(z => insideCabin(z.x, z.y))) bothInAt = w.time; });
+  check('two zombies side by side at a window both get through', bothInAt > 0, bothInAt > 0 ? `${bothInAt.toFixed(1)}s` : zs.map(z => `${z.x.toFixed(2)},${z.y.toFixed(2)}`).join(' '));
+}
+
+// ---- barricades: the bear smashes a whole window ----
+{
+  const h = headless();
+  h.game.start();
+  const w = h.game.world;
+  w.director = false;
+  const win = north();
+  const b = w.barricades.find(x => x.x === win.x && x.y === win.y);
+  Object.assign(w.player, { x: win.cx, y: win.cy + 1.5, god: true });
+  const bear = makeBear(win.cx, win.cy - 2.2);
+  bear.cooldown = 99; // no charge: test the walk-up smash
+  w.enemies.push(bear); w.bear = bear;
+  let tornAt = -1;
+  h.step(10, () => { if (tornAt < 0 && b.boards === 0) tornAt = w.time; });
+  check('bear smashes every board at once', tornAt > 0 && w.boardsTorn === BARRICADE.boards, `torn=${w.boardsTorn}`);
+}
+
 // ---- full run with god mode: win, then the arcade handoff ----
 {
   const h = headless();
@@ -198,7 +345,8 @@ check('map is rectangular with a solid border', MAP.every(r => r.length === MAP_
     if (p.weapon !== 'smg' && Math.random() < 0.3) h.tap('Space');
   });
   h.hold('Space', false);
-  check('god-mode run reaches the win card', h.game.mode === 'won', `mode=${h.game.mode} wave=${w.wave + 1}`);
+  check('god-mode run reaches the win card', h.game.mode === 'won', `mode=${h.game.mode} wave=${w.wave + 1}` +
+    (h.game.mode === 'won' ? '' : ` left=${JSON.stringify(w.enemies.map(e => ({ k: e.kind, x: +e.x.toFixed(2), y: +e.y.toFixed(2), s: e.state, tear: e.tearTimer })))} boards=${w.barricades.map(b => b.boards)} player=${w.player.x.toFixed(2)},${w.player.y.toFixed(2)}`));
   check('bought both wall guns', w.purchases.join(',') === 'shotgun,smg', w.purchases.join(','));
   check('the bear appeared in wave 3', bearSeen);
   check('all 24 zombies and the bear died', w.kills === 25, `kills=${w.kills}`);

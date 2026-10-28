@@ -1,5 +1,5 @@
 // Drawing: raycast walls, billboard sprites, the held gun, the HUD and the menu screens.
-import { W, H, PAL, FOV_SCALE, PLAYER, WEAPONS, WEAPON_ORDER, WAVES } from './config.js';
+import { W, H, PAL, DARKER, FOV_SCALE, PLAYER, WEAPONS, WEAPON_ORDER, WAVES } from './config.js';
 import { tileAt, isWallTile, TREES, insideCabin } from './world.js';
 
 // The pixel font comes from the arcade (api.text); createGame hands it over before the first draw.
@@ -95,6 +95,45 @@ function drawBillboard(g, img, cam, wx, wy, heightScale) {
     g.drawImage(img, texX, 0, 1, img.height, col, top, 1, h);
   }
   return { screenX, depth, top };
+}
+
+const shade = (color, steps) => { for (let i = 0; i < steps; i++) color = DARKER[color]; return color; };
+const PLANK_TILT = [0.05, -0.06, 0.04, -0.05, 0.06];
+
+/**
+ * Boards nailed across a window: a flat plane on the window's center line, drawn column by column with
+ * perspective-correct depth so walls in front clip it. Only boards still in place are drawn.
+ */
+function drawBarricade(g, cam, b) {
+  const NEAR = 0.1;
+  const [ax, ay, bx, by] = b.axis === 'x' ? [b.x, b.cy, b.x + 1, b.cy] : [b.cx, b.y, b.cx, b.y + 1];
+  let A = project(cam, ax, ay), B = project(cam, bx, by);
+  let ua = 0, ub = 1;
+  if (A.depth < NEAR && B.depth < NEAR) return;
+  if (A.depth < NEAR || B.depth < NEAR) {
+    // Depth is linear along the plank in world space, so clip the behind-camera end at the near plane.
+    const u = (NEAR - A.depth) / (B.depth - A.depth);
+    const clipped = project(cam, ax + (bx - ax) * u, ay + (by - ay) * u);
+    if (A.depth < NEAR) { A = clipped; ua = u; } else { B = clipped; ub = u; }
+  }
+  let L = { s: A.screenX, iz: 1 / A.depth, uz: ua / A.depth };
+  let R = { s: B.screenX, iz: 1 / B.depth, uz: ub / B.depth };
+  if (L.s > R.s) [L, R] = [R, L];
+  const x0 = Math.max(0, Math.ceil(L.s)), x1 = Math.min(W - 1, Math.floor(R.s));
+  for (let col = x0; col <= x1; col++) {
+    const k = R.s === L.s ? 0 : (col - L.s) / (R.s - L.s);
+    const iz = L.iz + (R.iz - L.iz) * k, depth = 1 / iz;
+    if (depth >= zbuf[col]) continue;
+    const u = (L.uz + (R.uz - L.uz) * k) / iz;
+    const full = H / depth, top = HORIZON - full / 2, fog = fogLevel(depth);
+    const th = Math.max(1, Math.round(full * 0.075));
+    for (let i = 0; i < b.boards; i++) {
+      const y = Math.round(top + full * (0.24 + i * 0.12 + PLANK_TILT[i % PLANK_TILT.length] * (u - 0.5)));
+      g.fillStyle = shade(PAL.tan, fog);
+      g.fillRect(col, y, 1, th);
+      if (th >= 3) { g.fillStyle = shade(PAL.log, fog); g.fillRect(col, y + th - 1, 1, 1); }
+    }
+  }
 }
 
 function pickImage(sheet, fog, flash) {
@@ -210,6 +249,16 @@ function drawHud(g, world, o) {
     drawText(g, line2, W / 2, 136, c2, { align: 'center' });
   }
 
+  if (o.repair) {
+    const { boards, max, progress, blocked, capped } = o.repair;
+    const full = boards >= max;
+    const line2 = full ? 'WINDOW SECURE' : blocked ? 'CLEAR THE WINDOW FIRST' : capped ? 'HOLD E TO REPAIR (NO PTS)' : 'HOLD E TO REPAIR';
+    panel(g, W / 2 - 70, 124, 140, progress > 0 ? 26 : 20);
+    drawText(g, `WINDOW - ${boards}/${max} BOARDS`, W / 2, 128, boards === 0 ? PAL.red : PAL.bone, { align: 'center' });
+    drawText(g, line2, W / 2, 136, full ? PAL.fog : blocked ? PAL.red : PAL.gold, { align: 'center' });
+    if (progress > 0) bar(g, W / 2 - 40, 144, 80, 3, progress, PAL.gold);
+  }
+
   if (world.banner.time > 0) {
     drawText(g, world.banner.text, W / 2, 40, PAL.gold, { scale: 2, align: 'center', shadow: PAL.black });
     if (world.banner.sub) drawText(g, world.banner.sub, W / 2, 55, PAL.bone, { align: 'center', shadow: PAL.black });
@@ -230,16 +279,20 @@ function drawHud(g, world, o) {
 /** One gameplay frame: world, sprites, gun, HUD. */
 export function drawFrame(g, art, world, o) {
   const p = world.player;
-  const shake = o.live && world.shakeTime > 0;
+  // Hits and the bear's charge shake 2 px; the bear's distant footsteps only rumble 1 px.
+  const amp = !o.live ? 0 : world.shakeTime > 0 ? 2 : world.rumbleTime > 0 ? 1 : 0;
   g.save();
-  if (shake) g.translate(Math.round(Math.random() * 4 - 2), Math.round(Math.random() * 4 - 2));
+  if (amp) g.translate(Math.round(Math.random() * 2 * amp - amp), Math.round(Math.random() * 2 * amp - amp));
   const cam = makeCamera(p.x, p.y, p.angle);
   drawBackdrop(g, art, p.angle, insideCabin(p.x, p.y));
   drawWalls(g, art, cam);
-  const sprites = TREES.map(t => ({ kind: 'tree', x: t.x, y: t.y })).concat(world.enemies);
+  const sprites = TREES.map(t => ({ kind: 'tree', x: t.x, y: t.y }))
+    .concat(world.enemies)
+    .concat(world.barricades.filter(b => b.boards > 0).map(b => ({ kind: 'barricade', ref: b, x: b.cx, y: b.cy })));
   for (const s of sprites) s._depth = project(cam, s.x, s.y).depth;
   sprites.sort((a, b) => b._depth - a._depth);
   for (const s of sprites) {
+    if (s.kind === 'barricade') { drawBarricade(g, cam, s.ref); continue; } // clips itself at the near plane
     if (s._depth <= 0.15) continue;
     if (s.kind === 'tree') drawBillboard(g, art.tree[fogLevel(s._depth)], cam, s.x, s.y, 1.9);
     else drawEnemy(g, art, cam, s, o.clock);
@@ -257,7 +310,7 @@ const CONTROLS = [
   ['MOUSE', 'AIM (CLICK TO CAPTURE)'],
   ['ARROWS', 'TURN / MOVE'],
   ['CLICK / SPACE', 'FIRE'],
-  ['E', 'BUY WALL GUN'],
+  ['E', 'BUY / HOLD: REPAIR'],
   ['1 2 3 / Q', 'SWITCH GUN'],
   ['ESC', 'PAUSE / ARCADE MENU'],
   ['M', 'MUTE'],

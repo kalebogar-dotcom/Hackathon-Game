@@ -53,4 +53,25 @@ export const WAVES = Object.freeze([
   { zombies: 8, spawnEvery: 1.6, bear: true, bearAfter: 2.5 },
 ]);
 export const MAX_ALIVE = 8;
-export const INTERMISSION = Object.freeze({ first: 3, between: 6 });
+// first: countdown before wave 1. between: preparation break after each non-final wave (no spawns).
+export const INTERMISSION = Object.freeze({ first: 3, between: 12 });
+
+// Cabin window barricades. Boards block bodies (not bullets); zombies tear them off, the player hammers them back.
+export const BARRICADE = Object.freeze({
+  boards: 5,            // boards on a fully repaired window
+  breakEvery: 1.3,      // seconds a zombie needs to tear off one board
+  breakReach: 1.0,      // a zombie this close to a boarded window's center starts tearing
+  repairTime: 0.9,      // seconds of holding E per board
+  repairRange: 1.25,    // tiles from the window's center
+  repairPoints: 10,     // points per board repaired...
+  rewardCapPerWave: 50, // ...up to this many points per window per wave (a wave's cap also covers the break after it)
+});
+
+// The bear's warning plays during the last seconds of the break before its wave.
+export const BEAR_WARNING = Object.freeze({
+  lead: 4.5,                       // starts this many seconds before the boss wave begins
+  steps: [0, 0.8, 1.6, 2.35, 3.0], // heavy footsteps, seconds after the warning starts
+  roarAt: 3.5,                     // distant roar
+  duration: 4.5,                   // the text stays up this long
+  rumble: 0.18,                    // seconds of 1-pixel screen shake per footstep
+});

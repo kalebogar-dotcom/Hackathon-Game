@@ -2,9 +2,9 @@
 // Gameplay: title screen, player, weapons, wall buys, zombies, the bear and the wave director.
 // Everything shared comes in through the arcade `api`; pause, mute and Play Again belong to the arcade.
 import {
-  PLAYER, WEAPONS, WEAPON_ORDER, BUY_RANGE, SCORE, ZOMBIE, BEAR, WAVES, MAX_ALIVE, INTERMISSION,
+  PLAYER, WEAPONS, WEAPON_ORDER, BUY_RANGE, SCORE, ZOMBIE, BEAR, WAVES, MAX_ALIVE, INTERMISSION, BARRICADE, BEAR_WARNING,
 } from './config.js';
-import { findTiles, WALL_BUYS, moveCircle, castRay, trunkHit, segmentClear, createNav } from './world.js';
+import { findTiles, WALL_BUYS, WINDOWS, moveCircle, castRay, trunkHit, segmentClear, createNav, setBoardedCheck } from './world.js';
 import { useText, drawFrame, drawTitle, drawEnd } from './render.js';
 import { buildArt } from './sprites.js';
 
@@ -53,6 +53,24 @@ export function findBuyNear(player) {
   return WALL_BUYS.find(b => Math.hypot(player.x - b.fx, player.y - b.fy) <= BUY_RANGE) ?? null;
 }
 
+/** The nearest window within repair range of the player, or null. */
+export function findRepairNear(world) {
+  const p = world.player;
+  let best = null, bestD = BARRICADE.repairRange;
+  for (const b of world.barricades) {
+    const d = Math.hypot(p.x - b.cx, p.y - b.cy);
+    if (d <= bestD) { best = b; bestD = d; }
+  }
+  return best;
+}
+
+/** True when a new board would trap someone standing in an empty window opening. */
+export function windowBlocked(world, b) {
+  if (b.boards > 0) return false; // nobody can stand inside a boarded opening
+  const inside = e => Math.abs(e.x - b.cx) < 0.5 + e.radius && Math.abs(e.y - b.cy) < 0.5 + e.radius;
+  return inside(world.player) || world.enemies.some(e => !e.dead && inside(e));
+}
+
 /** Buy (or re-equip) a wall gun. Points are deducted only when the purchase succeeds. */
 export function tryBuy(world, buy) {
   const p = world.player, w = WEAPONS[buy.weapon];
@@ -78,7 +96,7 @@ export function makeZombie(x, y, wave) {
   return {
     kind: 'zombie', x, y, radius: ZOMBIE.radius, hitRadius: ZOMBIE.hitRadius,
     hp: ZOMBIE.hp[wave], maxHp: ZOMBIE.hp[wave], speed: ZOMBIE.speed[wave] * (0.9 + Math.random() * 0.2),
-    attackTimer: ZOMBIE.windup, swipe: 0, flash: 0, anim: Math.random() * 4, groan: 2 + Math.random() * 5, dead: false,
+    attackTimer: ZOMBIE.windup, tearTimer: BARRICADE.breakEvery, swipe: 0, flash: 0, anim: Math.random() * 4, groan: 2 + Math.random() * 5, dead: false,
   };
 }
 
@@ -90,11 +108,47 @@ export function makeBear(x, y) {
   };
 }
 
+// ---------- barricades ----------
+
+/** The first boarded window on the straight line from (ax, ay) to (bx, by), or null. */
+function boardedAlong(world, ax, ay, bx, by) {
+  const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 0.1));
+  for (let i = 1; i <= n; i++) {
+    const b = world.boardedAt(Math.floor(ax + ((bx - ax) * i) / n), Math.floor(ay + ((by - ay) * i) / n));
+    if (b) return b;
+  }
+  return null;
+}
+
+/** Where an enemy on the (x, y) side of a window stands to tear at it. */
+function approachPoint(b, x, y) {
+  return b.axis === 'x'
+    ? { x: b.cx, y: b.cy + (y < b.cy ? -0.8 : 0.8) }
+    : { x: b.cx + (x < b.cx ? -0.8 : 0.8), y: b.cy };
+}
+
+function tearBoards(world, b, count) {
+  const torn = Math.min(count, b.boards);
+  if (!torn) return;
+  b.boards -= torn;
+  world.boardsTorn += torn;
+  world.audio.play('boardBreak');
+  world.burst(b.cx, b.cy, 0.5, ['#a8754a', '#6e4128'], 5 * torn, 1.2);
+}
+
 // ---------- enemies ----------
+
+/** Clear for the whole body, not just its center: both edges of the swept path miss walls and trunks. */
+function wideClear(e, p) {
+  const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy) || 1;
+  const ox = (-dy / d) * e.radius, oy = (dx / d) * e.radius;
+  return segmentClear(e.x + ox, e.y + oy, p.x + ox, p.y + oy) && segmentClear(e.x - ox, e.y - oy, p.x - ox, p.y - oy);
+}
 
 function chaseTarget(e, world) {
   const p = world.player;
-  if (Math.hypot(p.x - e.x, p.y - e.y) < 2.2 && segmentClear(e.x, e.y, p.x, p.y)) return p;
+  // Close by, walk straight at the player only if the body fits; otherwise follow the path grid (no corner scraping).
+  if (Math.hypot(p.x - e.x, p.y - e.y) < 2.2 && wideClear(e, p)) return p;
   return world.nav.waypoint(e.x, e.y) ?? p;
 }
 
@@ -120,8 +174,21 @@ function updateZombie(z, world, dt) {
   } else {
     z.attackTimer = ZOMBIE.windup;
     const t = chaseTarget(z, world);
-    steer(z, t.x, t.y, z.speed * dt);
-    z.anim += dt * z.speed * 3;
+    const b = boardedAlong(world, z.x, z.y, t.x, t.y);
+    if (b && Math.hypot(b.cx - z.x, b.cy - z.y) <= BARRICADE.breakReach) {
+      // At a boarded window: stand and tear off one board every breakEvery seconds.
+      z.tearTimer -= dt;
+      if (z.tearTimer <= 0) {
+        z.tearTimer = BARRICADE.breakEvery;
+        z.swipe = 0.25;
+        tearBoards(world, b, 1);
+      }
+    } else {
+      z.tearTimer = BARRICADE.breakEvery;
+      const goal = b ? approachPoint(b, z.x, z.y) : t;
+      steer(z, goal.x, goal.y, z.speed * dt);
+      z.anim += dt * z.speed * 3;
+    }
   }
   z.groan -= dt;
   if (z.groan <= 0) {
@@ -155,7 +222,11 @@ function updateBear(b, world, dt) {
       } else {
         b.swipeTimer = BEAR.swipeWindup;
         const t = chaseTarget(b, world);
-        steer(b, t.x, t.y, BEAR.speed * dt);
+        const win = boardedAlong(world, b.x, b.y, t.x, t.y);
+        // The bear smashes a whole window in one blow.
+        if (win && Math.hypot(win.cx - b.x, win.cy - b.y) <= BARRICADE.breakReach + 0.3) { tearBoards(world, win, win.boards); world.shake(0.25); }
+        const goal = win && win.boards > 0 ? approachPoint(win, b.x, b.y) : t;
+        steer(b, goal.x, goal.y, BEAR.speed * dt);
         b.anim += dt * 4;
       }
       break;
@@ -180,6 +251,8 @@ function updateBear(b, world, dt) {
         world.knockPlayer(b.dirX, b.dirY, BEAR.knockback);
       }
       if (blocked && !b.hitPlayer) {
+        const win = world.barricades.find(w => w.boards > 0 && Math.hypot(w.cx - b.x, w.cy - b.y) <= BARRICADE.breakReach + 0.3);
+        if (win) tearBoards(world, win, win.boards);
         b.state = 'stunned';
         b.timer = BEAR.stun;
         world.audio.play('thud');
@@ -197,15 +270,21 @@ function updateBear(b, world, dt) {
   }
 }
 
-function separate(enemies) {
+const nearWindow = e => WINDOWS.some(w => Math.abs(e.x - w.cx) < 1.5 && Math.abs(e.y - w.cy) < 1.5);
+
+export function separate(enemies) {
   for (let i = 0; i < enemies.length; i++) {
     for (let j = i + 1; j < enemies.length; j++) {
       const a = enemies[i], b = enemies[j];
       const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), min = a.radius + b.radius;
       if (d >= min || d < 1e-4) continue;
       const push = (min - d) / 2, nx = dx / d, ny = dy / d;
-      if (!(a.kind === 'bear' && a.state === 'charge')) moveCircle(a, -nx * push, -ny * push, a.radius);
-      if (!(b.kind === 'bear' && b.state === 'charge')) moveCircle(b, nx * push, ny * push, b.radius);
+      // A window is one tile wide: an even push can pin two zombies against the walls on either side of it.
+      // There they go single file instead: the later one gives way and the earlier one lines up with the gap.
+      const singleFile = a.kind === 'zombie' && b.kind === 'zombie' && nearWindow(a) && nearWindow(b);
+      const pushA = singleFile ? 0 : push, pushB = singleFile ? push * 2 : push;
+      if (pushA && !(a.kind === 'bear' && a.state === 'charge')) moveCircle(a, -nx * pushA, -ny * pushA, a.radius);
+      if (!(b.kind === 'bear' && b.state === 'charge')) moveCircle(b, nx * pushB, ny * pushB, b.radius);
     }
   }
 }
@@ -236,11 +315,17 @@ export function createGame(api) {
       wave: -1, phase: 'intermission', phaseTime: INTERMISSION.first, waveTime: 0,
       toSpawn: 0, bearPending: false, spawnTimer: 0, bear: null, director: true,
       banner: { text: 'SURVIVE THE NIGHT', sub: 'WAVE 1 IS COMING', time: INTERMISSION.first },
-      hitMarker: 0, shakeTime: 0, denyTime: 0,
+      hitMarker: 0, shakeTime: 0, rumbleTime: 0, denyTime: 0,
+      barricades: WINDOWS.map((win, i) => ({ ...win, id: i, boards: BARRICADE.boards, rewarded: 0 })),
+      repair: { target: null, progress: 0 }, repairs: 0, boardsTorn: 0,
+      warning: null, warned: new Set(),
       nav: createNav(), audio,
-      hurtPlayer, knockPlayer,
+      hurtPlayer, knockPlayer, burst,
       shake: t => { w.shakeTime = Math.max(w.shakeTime, t); },
     };
+    w.boardedAt = (tx, ty) => w.barricades.find(b => b.boards > 0 && b.x === tx && b.y === ty) ?? null;
+    w.boardedCheck = (tx, ty) => w.boardedAt(tx, ty) !== null;
+    setBoardedCheck(w.boardedCheck);
     w.nav.update(w.player.x, w.player.y);
     return w;
   }
@@ -304,6 +389,7 @@ export function createGame(api) {
     world.toSpawn = cfg.zombies;
     world.bearPending = cfg.bear;
     world.spawnTimer = 0.5;
+    for (const b of world.barricades) b.rewarded = 0; // repair rewards are capped per window per wave
     world.banner = { text: `WAVE ${world.wave + 1}`, sub: cfg.bear ? 'SOMETHING BIG IS AWAKE' : `${cfg.zombies} ZOMBIES`, time: 2 };
     audio.play('wave');
   }
@@ -417,6 +503,7 @@ export function createGame(api) {
       audio.play('equip');
     }
 
+    // E: a wall gun in range always wins; otherwise a fresh press starts repairing the nearest window.
     const buy = findBuyNear(p);
     if (buy && input.wasPressed('KeyE')) {
       const r = tryBuy(world, buy);
@@ -424,6 +511,7 @@ export function createGame(api) {
       else if (r.reason === 'equipped') audio.play('equip');
       else if (!r.ok) { audio.play('deny'); world.denyTime = 0.6; }
     }
+    updateRepair(buy ? null : findRepairNear(world), dt);
 
     const w = WEAPONS[p.weapon];
     const mouseFire = input.pointerLocked && (w.auto ? input.mouse.down : input.mouse.pressed);
@@ -438,6 +526,23 @@ export function createGame(api) {
     p.hurtFlash = Math.max(0, p.hurtFlash - dt);
   }
 
+  /** Hold E at a window to hammer boards back one at a time. Releasing E or walking off cancels the board in progress. */
+  function updateRepair(fix, dt) {
+    const r = world.repair;
+    if (fix && input.wasPressed('KeyE')) { r.target = fix; r.progress = 0; }
+    else if (!input.isDown('KeyE') || r.target !== fix) { r.target = null; r.progress = 0; }
+    const b = r.target;
+    if (!b || b.boards >= BARRICADE.boards || windowBlocked(world, b)) { r.progress = 0; return; }
+    r.progress += dt / BARRICADE.repairTime;
+    if (r.progress < 1) return;
+    r.progress = 0;
+    b.boards++;
+    world.repairs++;
+    const pts = Math.min(BARRICADE.repairPoints, BARRICADE.rewardCapPerWave - b.rewarded);
+    if (pts > 0) { world.points += pts; world.earned += pts; b.rewarded += pts; }
+    audio.play('board');
+  }
+
   function updateParticles(dt) {
     for (const q of world.particles) {
       q.x += q.vx * dt; q.y += q.vy * dt; q.z += q.vz * dt;
@@ -450,6 +555,7 @@ export function createGame(api) {
 
   function updatePlay(dt) {
     if (input.mouse.pressed && !input.pointerLocked) input.lockPointer(); // this click never fires: aiming needs the lock
+    setBoardedCheck(world.boardedCheck); // collision always uses this run's barricades
     world.time += dt;
     updatePlayer(dt);
     if (mode !== 'play') return;
@@ -494,9 +600,15 @@ export function createGame(api) {
     g.imageSmoothingEnabled = false;
     if (mode === 'title') { drawTitle(g, art, clock, api.best); return; }
     const buy = mode === 'play' && findBuyNear(world.player);
+    const fix = mode === 'play' && !buy && findRepairNear(world);
     drawFrame(g, art, world, {
       clock, locked: input.pointerLocked, live: mode === 'play', remaining: remaining(),
       buy: buy && { weapon: WEAPONS[buy.weapon], owned: world.player.owned.has(buy.weapon), equipped: world.player.weapon === buy.weapon, affordable: world.points >= WEAPONS[buy.weapon].price, denied: world.denyTime > 0 },
+      repair: fix && {
+        boards: fix.boards, max: BARRICADE.boards, blocked: windowBlocked(world, fix),
+        progress: world.repair.target === fix ? world.repair.progress : 0,
+        capped: fix.rewarded >= BARRICADE.rewardCapPerWave,
+      },
     });
     if (mode === 'won' || mode === 'lost') drawEnd(g, world, mode === 'won', modeTime);
   }
@@ -511,12 +623,17 @@ export function createGame(api) {
       player: { x: p.x, y: p.y, angle: p.angle, health: p.health, weapon: p.weapon, owned: [...p.owned] },
       enemies: world.enemies.map(e => ({ kind: e.kind, x: e.x, y: e.y, hp: e.hp, state: e.state ?? null })),
       bear: world.bear && { hp: world.bear.hp, maxHp: world.bear.maxHp, state: world.bear.state, charges: world.bear.charges },
+      phaseTime: world.phaseTime,
+      barricades: world.barricades.map(b => ({ x: b.x, y: b.y, boards: b.boards, rewarded: b.rewarded })),
+      repairs: world.repairs, boardsTorn: world.boardsTorn,
+      warning: world.warning && { t: world.warning.t }, warned: [...world.warned],
     };
   }
 
   return {
     update, draw, debug,
-    destroy() {}, // nothing to release: no DOM listeners, timers or loops of its own
+    // No DOM listeners, timers or loops of its own; only the shared collision hook for boarded windows.
+    destroy() { setBoardedCheck(null); },
     // Used by tests/bear-unit.mjs to drive scenarios directly.
     get mode() { return mode; },
     get world() { return world; },
