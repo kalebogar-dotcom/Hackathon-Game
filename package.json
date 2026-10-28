@@ -5,7 +5,8 @@
   "description": "Retro arcade hub with three playable minigames (browser, no dependencies).",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node tests/run-headless.mjs"
   },
   "engines": {
     "node": ">=18"
