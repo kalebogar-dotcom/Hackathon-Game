@@ -31,7 +31,8 @@ export function createGame(api) {
   let bannerTime = 1.0;
   let kills = 0;
   let fireCooldown = 0;
-  let muzzle = 0, recoil = 0, hurt = 0, bob = 0, time = 0;
+  let muzzle = 0, recoil = 0, hurt = 0, bob = 0, time = 0, hitMarker = 0;
+  let particles = [];
   let over = false;
 
   const camera = () => makeCamera(player.x, player.y, player.angle, FOV_SCALE);
@@ -82,13 +83,70 @@ export function createGame(api) {
     // knockback
     const d = Math.hypot(target.x - player.x, target.y - player.y) || 1;
     moveCircle(target, ((target.x - player.x) / d) * 0.25, ((target.y - player.y) / d) * 0.25, GHOUL.radius);
+    hitMarker = 0.12;
     if (target.hp <= 0) {
       ghouls = ghouls.filter(gh => gh !== target);
       kills++;
+      burst(target.x, target.y);
       audio.play('explode');
     } else {
       audio.play('hit');
     }
+  }
+
+  // Pixel debris flung out of a defeated ghoul (z = height in wall units).
+  function burst(x, y) {
+    const colors = [P.green, P.green, P.violet, P.red];
+    for (let i = 0; i < 14; i++) {
+      const a = Math.random() * Math.PI * 2, s = 0.6 + Math.random() * 1.2;
+      particles.push({
+        x, y, z: 0.35 + Math.random() * 0.25,
+        vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: 0.6 + Math.random() * 0.9,
+        life: 0.7 + Math.random() * 0.4, color: colors[i % colors.length],
+      });
+    }
+  }
+
+  function updateParticles(dt) {
+    for (const pt of particles) {
+      pt.x += pt.vx * dt;
+      pt.y += pt.vy * dt;
+      pt.vz -= 3 * dt;
+      pt.z = Math.max(0, pt.z + pt.vz * dt);
+      pt.life -= dt;
+    }
+    particles = particles.filter(pt => pt.life > 0);
+  }
+
+  function drawParticles(g, cam) {
+    for (const pt of particles) {
+      const { screenX, depth } = project(cam, pt.x, pt.y, W);
+      const col = Math.round(screenX);
+      if (depth <= 0.2 || col < 0 || col >= W || depth >= zbuf[col]) continue;
+      const full = H / depth;
+      const size = Math.max(1, Math.round(full * 0.05));
+      g.fillStyle = pt.color;
+      g.fillRect(col, Math.round(H / 2 + full / 2 - pt.z * full), size, size);
+    }
+  }
+
+  function drawMinimap(g) {
+    const s = 2, ox = 4, oy = H - 16 - ARENA.length * s;
+    g.fillStyle = P.black;
+    g.fillRect(ox - 1, oy - 1, ARENA[0].length * s + 2, ARENA.length * s + 2);
+    ARENA.forEach((row, y) => [...row].forEach((c, x) => {
+      if (c === '#' || c === 'B') {
+        g.fillStyle = c === '#' ? P.brown : P.teal;
+        g.fillRect(ox + x * s, oy + y * s, s, s);
+      }
+    }));
+    g.fillStyle = P.red;
+    for (const gh of ghouls) g.fillRect(ox + Math.floor(gh.x * s) - 1, oy + Math.floor(gh.y * s) - 1, 2, 2);
+    const px = ox + Math.floor(player.x * s), py = oy + Math.floor(player.y * s);
+    g.fillStyle = P.yellow;
+    g.fillRect(px + Math.round(Math.cos(player.angle) * 3), py + Math.round(Math.sin(player.angle) * 3), 1, 1);
+    g.fillStyle = P.cream;
+    g.fillRect(px - 1, py - 1, 2, 2);
   }
 
   function end(won) {
@@ -173,6 +231,8 @@ export function createGame(api) {
         }
       }
 
+      updateParticles(dt);
+      hitMarker = Math.max(0, hitMarker - dt);
       muzzle = Math.max(0, muzzle - dt);
       recoil = Math.max(0, recoil - dt * 6);
       hurt = Math.max(0, hurt - dt);
@@ -202,6 +262,7 @@ export function createGame(api) {
         const sway = Math.sin(time * 8 + gh.phase) * 0.02;
         drawBillboard(g, gh.flash > 0 ? art.ghoulHurt : art.ghoul, cam, gh.x, gh.y, W, H, zbuf, 0.75, Math.max(0, sway));
       }
+      drawParticles(g, cam);
 
       // Blaster with walk bob + recoil, and muzzle flash
       const scale = 3;
@@ -211,8 +272,8 @@ export function createGame(api) {
       if (muzzle > 0) g.drawImage(art.flash, W / 2 - 12, gy - 14, art.flash.width * 3, art.flash.height * 3);
       g.drawImage(art.blaster, gx, gy, gw, gh);
 
-      // Crosshair
-      g.fillStyle = P.cream;
+      // Crosshair (red flash on a hit)
+      g.fillStyle = hitMarker > 0 ? P.red : P.cream;
       g.fillRect(W / 2 - 5, H / 2, 3, 1);
       g.fillRect(W / 2 + 3, H / 2, 3, 1);
       g.fillRect(W / 2, H / 2 - 5, 1, 3);
@@ -227,6 +288,7 @@ export function createGame(api) {
       }
 
       // HUD
+      drawMinimap(g);
       const hpW = 60;
       g.fillStyle = P.black;
       g.fillRect(4, H - 12, hpW + 18, 9);
