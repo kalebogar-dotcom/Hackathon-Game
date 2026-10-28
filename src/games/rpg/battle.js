@@ -32,7 +32,15 @@ export function createBattle({ api, art, onEnd }) {
     hp: BATTLE.playerMaxHp, enemyHp: BATTLE.enemyMaxHp, herbs: BATTLE.herbs,
     phase: 'intro', timer: 1.2, message: TXT.start, choice: 0,
     enemyFlash: 0, shake: 0, time: 0, ended: false,
+    popups: [],      // floating numbers: { text, x, y, color, t }
+    lunge: null,     // { who: 'ember' | 'slime', t }
+    sparkle: 0,      // heal sparkle timer
   };
+  const EMBER_POS = { x: 50, y: 68 };
+  const SLIME_POS = { x: 196, y: 28 };
+  const LUNGE_TIME = 0.25;
+  const POPUP_TIME = 0.9;
+  const popup = (text, x, y, color) => s.popups.push({ text, x, y, color, t: 0 });
   const options = () => [{ id: 'attack', label: 'ATTACK' }, { id: 'heal', label: `HEAL X${s.herbs}` }];
   let optionRects = [];
 
@@ -43,11 +51,15 @@ export function createBattle({ api, art, onEnd }) {
       const amount = Math.min(BATTLE.heal, BATTLE.playerMaxHp - s.hp);
       s.hp += amount;
       s.message = TXT.heal(amount);
+      s.sparkle = 0.6;
+      popup(`+${amount}`, EMBER_POS.x + 18, EMBER_POS.y - 4, P.green);
       audio.play('heal');
     } else {
       const dmg = roll(BATTLE.attack);
       s.enemyHp = Math.max(0, s.enemyHp - dmg);
       s.enemyFlash = 0.3;
+      s.lunge = { who: 'ember', t: 0 };
+      popup(`-${dmg}`, SLIME_POS.x + 32, SLIME_POS.y - 14, P.yellow);
       s.message = TXT.attack(dmg);
       audio.play('hit');
     }
@@ -71,6 +83,10 @@ export function createBattle({ api, art, onEnd }) {
       s.time += dt;
       s.enemyFlash = Math.max(0, s.enemyFlash - dt);
       s.shake = Math.max(0, s.shake - dt);
+      s.sparkle = Math.max(0, s.sparkle - dt);
+      if (s.lunge && (s.lunge.t += dt) >= LUNGE_TIME) s.lunge = null;
+      for (const p of s.popups) p.t += dt;
+      s.popups = s.popups.filter(p => p.t < POPUP_TIME);
 
       if (s.phase === 'menu') {
         const n = options().length;
@@ -103,6 +119,8 @@ export function createBattle({ api, art, onEnd }) {
           const dmg = roll(BATTLE.enemyAttack);
           s.hp = Math.max(0, s.hp - dmg);
           s.shake = 0.3;
+          s.lunge = { who: 'slime', t: 0 };
+          popup(`-${dmg}`, EMBER_POS.x + 18, EMBER_POS.y - 4, P.red);
           s.message = TXT.enemy(dmg);
           audio.play('hurt');
           s.phase = 'enemy';
@@ -126,14 +144,32 @@ export function createBattle({ api, art, onEnd }) {
       g.fillRect(180, 70, 96, 10);
       g.fillRect(30, 106, 76, 10);
 
+      // Lunges: the attacker hops toward the other side and back
+      const reach = who => (s.lunge?.who === who ? Math.sin((s.lunge.t / LUNGE_TIME) * Math.PI) : 0);
+      const emberDx = Math.round(reach('ember') * 14), emberDy = -Math.round(reach('ember') * 6);
+      const slimeDx = -Math.round(reach('slime') * 18), slimeDy = Math.round(reach('slime') * 8);
+
       // Slime (fades out when defeated)
       const bob = Math.round(Math.sin(s.time * 3) * 2);
       if (s.phase === 'won') g.globalAlpha = Math.max(0, s.timer / 1.6);
       const slime = s.enemyFlash > 0 && Math.floor(s.time * 20) % 2 ? art.slimeHurt : art.slime;
-      g.drawImage(slime, 196, 28 + bob, slime.width * 4, slime.height * 4);
+      g.drawImage(slime, SLIME_POS.x + slimeDx, SLIME_POS.y + bob + slimeDy, slime.width * 4, slime.height * 4);
       g.globalAlpha = 1;
       // Ember from behind
-      g.drawImage(art.emberUp, 50, 68, art.emberUp.width * 3, art.emberUp.height * 3);
+      g.drawImage(art.emberUp, EMBER_POS.x + emberDx, EMBER_POS.y + emberDy, art.emberUp.width * 3, art.emberUp.height * 3);
+      // Heal sparkles drifting up around Ember
+      if (s.sparkle > 0) {
+        g.fillStyle = Math.floor(s.time * 16) % 2 ? P.cream : P.green;
+        for (let i = 0; i < 6; i++) {
+          const rise = (0.6 - s.sparkle) * 40 + (i % 3) * 5;
+          g.fillRect(EMBER_POS.x + 2 + i * 6, EMBER_POS.y + 34 - rise, 1, 2);
+        }
+      }
+      // Floating damage / heal numbers
+      for (const p of s.popups) {
+        const k = p.t / POPUP_TIME;
+        api.text(g, p.text, p.x, p.y - k * 14, p.color, { scale: 2, align: 'center', shadow: P.black });
+      }
 
       // Status panels
       api.text(g, 'CELLAR SLIME', 16, 14, P.cream, { shadow: P.black });
