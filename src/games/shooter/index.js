@@ -396,7 +396,10 @@ export function createGame(api) {
 
   function updateWaves(dt) {
     if (world.phase === 'intermission') {
+      // Preparation break: no spawns. Runs on game time, so the arcade's pause freezes it.
+      const before = world.phaseTime;
       world.phaseTime -= dt;
+      if (world.wave >= 0 && [3, 2, 1].some(s => before > s && world.phaseTime <= s)) audio.play('blip');
       if (world.phaseTime <= 0) beginWave();
       return;
     }
@@ -423,7 +426,7 @@ export function createGame(api) {
       if (world.wave === WAVES.length - 1) { endRun(true); return; }
       world.phase = 'intermission';
       world.phaseTime = INTERMISSION.between;
-      world.banner = { text: `WAVE ${world.wave + 1} CLEARED`, sub: 'BUY GUNS ON THE CABIN WALLS', time: 3 };
+      world.banner = { text: `WAVE ${world.wave + 1} CLEARED`, sub: 'BUY GUNS - REPAIR THE WINDOWS', time: 3 };
       audio.play('clear');
     }
   }

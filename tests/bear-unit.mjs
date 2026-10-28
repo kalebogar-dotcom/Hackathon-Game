@@ -3,7 +3,7 @@
 // Usage: node tests/bear-unit.mjs   (also part of `npm test`)
 import { createGame, tryBuy, traceShot, makeZombie, makeBear, findBuyNear, findRepairNear, windowBlocked } from '../src/games/shooter/index.js';
 import { MAP, MAP_W, MAP_H, WALL_BUYS, WINDOWS, findTiles, isWallTile, isWall, isWalkableTile, createNav, insideCabin } from '../src/games/shooter/world.js';
-import { WEAPONS, BEAR, BARRICADE } from '../src/games/shooter/config.js';
+import { WEAPONS, BEAR, BARRICADE, INTERMISSION } from '../src/games/shooter/config.js';
 
 let seed = 12345;
 Math.random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
@@ -324,6 +324,48 @@ const north = () => WINDOWS.find(w => w.axis === 'x');
   check('bear smashes every board at once', tornAt > 0 && w.boardsTorn === BARRICADE.boards, `torn=${w.boardsTorn}`);
 }
 
+// ---- breaks between waves ----
+{
+  const h = headless();
+  h.game.start();
+  const w = h.game.world;
+  w.player.god = true;
+  h.step(INTERMISSION.first + 0.2);
+  check('wave 1 starts after the opening countdown', w.wave === 0 && w.phase === 'active');
+  w.toSpawn = 0; w.enemies = []; // clear wave 1
+  h.step(0.05);
+  check('clearing a non-final wave starts a 12 s break', w.phase === 'intermission' && w.wave === 0 && Math.abs(w.phaseTime - INTERMISSION.between) < 0.1, `phaseTime=${w.phaseTime.toFixed(2)}`);
+  const s0 = h.sounds.length;
+  let most = 0;
+  const waves = new Set();
+  h.step(INTERMISSION.between - 0.3, () => { most = Math.max(most, w.enemies.length, w.toSpawn); waves.add(w.wave); });
+  check('nothing spawns during the break', most === 0 && w.phase === 'intermission');
+  check('the wave number holds during the break', [...waves].join() === '0');
+  const ticks = h.sounds.slice(s0).filter(s => s === 'blip').length;
+  check('countdown ticks at 3, 2 and 1', ticks === 3, `${ticks}`);
+  h.step(0.4);
+  check('the break ends and wave 2 starts exactly once', w.wave === 1 && w.phase === 'active' && h.sounds.slice(s0).filter(s => s === 'wave').length === 1);
+}
+{
+  const h = headless();
+  h.game.start();
+  const w = h.game.world;
+  w.player.god = true;
+  h.step(INTERMISSION.first + 0.2);
+  w.toSpawn = 0; w.enemies = [];
+  h.step(0.05);
+  const shotgun = WALL_BUYS.find(b => b.weapon === 'shotgun');
+  w.points = 400;
+  Object.assign(w.player, { x: shotgun.fx, y: shotgun.fy + 0.4 });
+  h.tap('KeyE'); h.step(0.05);
+  const bought = w.player.owned.has('shotgun') && w.points === 0;
+  const win = north(), b = w.barricades.find(x => x.x === win.x && x.y === win.y);
+  b.boards = 1;
+  Object.assign(w.player, { x: win.cx, y: win.cy + 0.95 });
+  h.tap('KeyE'); h.hold('KeyE'); h.step(BARRICADE.repairTime * 2.1); h.hold('KeyE', false);
+  check('buying and repairing both work during the break', bought && b.boards === 3 && w.phase === 'intermission', `bought=${bought} boards=${b.boards}`);
+}
+
 // ---- full run with god mode: win, then the arcade handoff ----
 {
   const h = headless();
@@ -332,8 +374,10 @@ const north = () => WINDOWS.find(w => w.axis === 'x');
   w.player.god = true;
   const shotgun = WALL_BUYS.find(b => b.weapon === 'shotgun'), smg = WALL_BUYS.find(b => b.weapon === 'smg');
   let bearSeen = false, wonAt = -1;
+  const waveSeq = [];
   h.hold('Space');
   h.step(400, () => {
+    if (waveSeq.at(-1) !== w.wave) waveSeq.push(w.wave);
     if (h.game.mode === 'won' && wonAt < 0) wonAt = w.time;
     if (h.game.mode !== 'play') return;
     const p = w.player;
@@ -347,6 +391,7 @@ const north = () => WINDOWS.find(w => w.axis === 'x');
   h.hold('Space', false);
   check('god-mode run reaches the win card', h.game.mode === 'won', `mode=${h.game.mode} wave=${w.wave + 1}` +
     (h.game.mode === 'won' ? '' : ` left=${JSON.stringify(w.enemies.map(e => ({ k: e.kind, x: +e.x.toFixed(2), y: +e.y.toFixed(2), s: e.state, tear: e.tearTimer })))} boards=${w.barricades.map(b => b.boards)} player=${w.player.x.toFixed(2)},${w.player.y.toFixed(2)}`));
+  check('waves advance once each: 1, 2, 3', waveSeq.join(',') === '-1,0,1,2', waveSeq.join(','));
   check('bought both wall guns', w.purchases.join(',') === 'shotgun,smg', w.purchases.join(','));
   check('the bear appeared in wave 3', bearSeen);
   check('all 24 zombies and the bear died', w.kills === 25, `kills=${w.kills}`);

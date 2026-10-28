@@ -1,5 +1,5 @@
 // Drawing: raycast walls, billboard sprites, the held gun, the HUD and the menu screens.
-import { W, H, PAL, DARKER, FOV_SCALE, PLAYER, WEAPONS, WEAPON_ORDER, WAVES } from './config.js';
+import { W, H, PAL, DARKER, FOV_SCALE, PLAYER, WEAPONS, WEAPON_ORDER, WAVES, INTERMISSION } from './config.js';
 import { tileAt, isWallTile, TREES, insideCabin } from './world.js';
 
 // The pixel font comes from the arcade (api.text); createGame hands it over before the first draw.
@@ -225,6 +225,14 @@ function drawHud(g, world, o) {
     bar(g, W / 2 - 60, 12, 120, 4, bear.hp / bear.maxHp, PAL.red);
   }
 
+  // Break between waves: the next wave's number, a countdown and a draining bar.
+  if (world.phase === 'intermission' && world.wave >= 0) {
+    const secs = Math.ceil(world.phaseTime);
+    panel(g, W / 2 - 64, 2, 128, 17);
+    drawText(g, `WAVE ${world.wave + 2} IN ${secs}`, W / 2, 5, secs <= 3 ? PAL.gold : PAL.bone, { align: 'center' });
+    bar(g, W / 2 - 60, 12, 120, 3, world.phaseTime / INTERMISSION.between, PAL.gold);
+  }
+
   panel(g, 2, H - 20, 88, 18);
   drawText(g, 'HP', 5, H - 16, PAL.bone);
   const low = p.health < 35;
@@ -262,8 +270,6 @@ function drawHud(g, world, o) {
   if (world.banner.time > 0) {
     drawText(g, world.banner.text, W / 2, 40, PAL.gold, { scale: 2, align: 'center', shadow: PAL.black });
     if (world.banner.sub) drawText(g, world.banner.sub, W / 2, 55, PAL.bone, { align: 'center', shadow: PAL.black });
-  } else if (world.phase === 'intermission') {
-    drawText(g, `NEXT WAVE IN ${Math.ceil(world.phaseTime)}`, W / 2, 40, PAL.bone, { align: 'center', shadow: PAL.black });
   }
 
   if (o.live && !o.locked) drawText(g, 'CLICK TO AIM WITH THE MOUSE', W / 2, 24, PAL.fog, { align: 'center', shadow: PAL.black });
