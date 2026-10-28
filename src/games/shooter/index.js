@@ -400,6 +400,12 @@ export function createGame(api) {
       const before = world.phaseTime;
       world.phaseTime -= dt;
       if (world.wave >= 0 && [3, 2, 1].some(s => before > s && world.phaseTime <= s)) audio.play('blip');
+      // The bear announces itself during the last seconds before its wave, once per appearance.
+      const next = world.wave + 1;
+      if (WAVES[next]?.bear && !world.warned.has(next) && world.phaseTime <= BEAR_WARNING.lead) {
+        world.warned.add(next);
+        world.warning = { t: 0, step: 0, roared: false };
+      }
       if (world.phaseTime <= 0) beginWave();
       return;
     }
@@ -429,6 +435,24 @@ export function createGame(api) {
       world.banner = { text: `WAVE ${world.wave + 1} CLEARED`, sub: 'BUY GUNS - REPAIR THE WINDOWS', time: 3 };
       audio.play('clear');
     }
+  }
+
+  /** Footsteps, then a distant roar, on game time: pausing freezes it, a restart or exit drops it with the run. */
+  function updateWarning(dt) {
+    const wn = world.warning;
+    if (!wn) return;
+    wn.t += dt;
+    while (wn.step < BEAR_WARNING.steps.length && wn.t >= BEAR_WARNING.steps[wn.step]) {
+      wn.step++;
+      audio.play('bearStep');
+      world.rumbleTime = Math.max(world.rumbleTime, BEAR_WARNING.rumble);
+    }
+    if (!wn.roared && wn.t >= BEAR_WARNING.roarAt) {
+      wn.roared = true;
+      audio.play('bearCall');
+      world.rumbleTime = Math.max(world.rumbleTime, 0.5);
+    }
+    if (wn.t >= BEAR_WARNING.duration) world.warning = null;
   }
 
   // ----- player -----
@@ -567,10 +591,12 @@ export function createGame(api) {
     if (mode !== 'play') return;
     separate(world.enemies);
     if (world.director) updateWaves(dt);
+    updateWarning(dt);
     updateParticles(dt);
     world.banner.time -= dt;
     world.hitMarker = Math.max(0, world.hitMarker - dt);
     world.shakeTime = Math.max(0, world.shakeTime - dt);
+    world.rumbleTime = Math.max(0, world.rumbleTime - dt);
     world.denyTime = Math.max(0, world.denyTime - dt);
   }
 

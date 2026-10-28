@@ -3,7 +3,7 @@
 // Usage: node tests/bear-unit.mjs   (also part of `npm test`)
 import { createGame, tryBuy, traceShot, makeZombie, makeBear, findBuyNear, findRepairNear, windowBlocked } from '../src/games/shooter/index.js';
 import { MAP, MAP_W, MAP_H, WALL_BUYS, WINDOWS, findTiles, isWallTile, isWall, isWalkableTile, createNav, insideCabin } from '../src/games/shooter/world.js';
-import { WEAPONS, BEAR, BARRICADE, INTERMISSION } from '../src/games/shooter/config.js';
+import { WEAPONS, BEAR, BARRICADE, INTERMISSION, BEAR_WARNING, WAVES } from '../src/games/shooter/config.js';
 
 let seed = 12345;
 Math.random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
@@ -364,6 +364,59 @@ const north = () => WINDOWS.find(w => w.axis === 'x');
   Object.assign(w.player, { x: win.cx, y: win.cy + 0.95 });
   h.tap('KeyE'); h.hold('KeyE'); h.step(BARRICADE.repairTime * 2.1); h.hold('KeyE', false);
   check('buying and repairing both work during the break', bought && b.boards === 3 && w.phase === 'intermission', `bought=${bought} boards=${b.boards}`);
+}
+
+// ---- the bear's warning ----
+{
+  const h = headless();
+  h.game.start();
+  const w = h.game.world;
+  w.player.god = true;
+  const clearWave = () => { w.toSpawn = 0; w.enemies = []; w.bearPending = false; };
+  h.step(INTERMISSION.first + 0.2);
+  clearWave(); h.step(0.05); // break before wave 2 (no bear)
+  let warnedEarly = false;
+  h.step(INTERMISSION.between + 0.2, () => { if (w.warning) warnedEarly = true; });
+  check('no warning before a wave without the bear', !warnedEarly && w.wave === 1);
+  clearWave(); h.step(0.05); // break before wave 3 (the bear)
+  const bossWave = WAVES.findIndex(c => c.bear);
+  let warnStart = -1, warnEnd = -1, waveStart = -1, rumbled = false;
+  const s0 = h.sounds.length;
+  const t0 = w.time;
+  h.step(INTERMISSION.between + 0.5, () => {
+    if (warnStart < 0 && w.warning) warnStart = w.time - t0;
+    if (warnStart >= 0 && warnEnd < 0 && !w.warning) warnEnd = w.time - t0;
+    if (waveStart < 0 && w.wave === bossWave) waveStart = w.time - t0;
+    if (w.rumbleTime > 0) rumbled = true;
+  });
+  const after = h.sounds.slice(s0);
+  check('warning starts in the last seconds of the boss break', Math.abs(warnStart - (INTERMISSION.between - BEAR_WARNING.lead)) < 0.05, `starts ${warnStart.toFixed(2)}s into a ${INTERMISSION.between}s break`);
+  check('warning ends as the boss wave begins', Math.abs(warnEnd - waveStart) < 0.05, `end ${warnEnd.toFixed(2)}s, wave ${waveStart.toFixed(2)}s`);
+  check('heavy footsteps then one roar, before the bear spawns',
+    after.filter(s => s === 'bearStep').length === BEAR_WARNING.steps.length && after.filter(s => s === 'bearCall').length === 1 &&
+    after.indexOf('bearCall') > after.lastIndexOf('bearStep') && !w.bear,
+    `steps=${after.filter(s => s === 'bearStep').length} calls=${after.filter(s => s === 'bearCall').length} bear=${!!w.bear}`);
+  check('footsteps shake the screen', rumbled);
+  const callsBefore = h.sounds.filter(s => s === 'bearCall').length;
+  h.step(10);
+  check('the warning plays once per boss appearance', w.warned.has(bossWave) && w.warned.size === 1 &&
+    h.sounds.filter(s => s === 'bearCall').length === callsBefore && !!w.bear, `bear=${!!w.bear}`);
+}
+{
+  // Restart mid-warning: a new run starts with fresh barricades, rewards, timers and warning state.
+  const h = headless();
+  h.game.start();
+  const w = h.game.world;
+  w.player.god = true;
+  w.barricades[0].boards = 1; w.barricades[0].rewarded = 30; w.points = 500;
+  w.wave = 1; w.phase = 'intermission'; w.phaseTime = BEAR_WARNING.lead - 1;
+  h.step(0.5);
+  const mid = !!w.warning;
+  h.game.start(); // what Play Again / Restart does with a fresh instance, applied in place
+  const d = h.game.debug(), nw = h.game.world;
+  check('restarting resets barricades, rewards, timers and warnings', mid && nw !== w && d.wave === 0 && d.phase === 'intermission' &&
+    d.barricades.every(b => b.boards === BARRICADE.boards && b.rewarded === 0) && d.points === 0 && !d.warning && d.warned.length === 0 &&
+    Math.abs(d.phaseTime - INTERMISSION.first) < 0.01 && nw.rumbleTime === 0, JSON.stringify({ mid, wave: d.wave, warning: d.warning, warned: d.warned }));
 }
 
 // ---- full run with god mode: win, then the arcade handoff ----

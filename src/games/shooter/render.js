@@ -272,6 +272,11 @@ function drawHud(g, world, o) {
     if (world.banner.sub) drawText(g, world.banner.sub, W / 2, 55, PAL.bone, { align: 'center', shadow: PAL.black });
   }
 
+  // The bear's warning flickers in, then holds until its wave starts.
+  if (world.warning && (world.warning.t > 0.6 || Math.floor(world.warning.t * 10) % 2 === 0)) {
+    drawText(g, 'SOMETHING IS IN THE WOODS...', W / 2, 68, PAL.red, { scale: 2, align: 'center', shadow: PAL.black });
+  }
+
   if (o.live && !o.locked) drawText(g, 'CLICK TO AIM WITH THE MOUSE', W / 2, 24, PAL.fog, { align: 'center', shadow: PAL.black });
 
   const pain = p.hurtFlash / 0.35;
