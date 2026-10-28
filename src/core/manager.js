@@ -287,6 +287,10 @@ export function createManager({ W, H, input, audio, machines, hub }) {
     o.menu.draw(g, W / 2, y + 2);
   }
 
+  function safeGameDebug() {
+    try { return current?.game?.debug?.() ?? null; } catch (err) { return { error: String(err) }; }
+  }
+
   return {
     preload,
     update,
@@ -309,6 +313,7 @@ export function createManager({ W, H, input, audio, machines, hub }) {
         pointerWanted: current?.pointerWanted ?? false,
         pointerLocked: input.pointerLocked,
         liveSounds: audio.activeCount,
+        game: safeGameDebug(),
         stats: { ...stats },
         progress: JSON.parse(JSON.stringify(progress)),
       };
