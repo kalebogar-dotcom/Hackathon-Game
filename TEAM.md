@@ -174,11 +174,9 @@ and is what the automated playtests read. It must not change state.
   toggle, per-machine control hint in the hub; PEBBLE JUMP stompable beetles (one moved after testing showed it
   sat in a blind landing spot after a pit); GHOUL SHIFT death bursts, red hit marker, minimap; EMBER TALE
   battle lunges, floating damage/heal numbers, heal sparkles. Tests now live in `tests/` (see README).
-- **Browser suite after polish: 18 / 22 pass, 4 not run to completion.** Everything through the RPG section
-  passed with no user input. The last four (shooter win in the page, 9 rapid switches, 60 updates/s, all-three
-  progress) could not run because the browser window went hidden (page reported 0–2 updates/s before the
-  test touched anything). The same four passed in the pre-polish browser run, and the shooter win passes
-  headlessly. **To do:** re-run the browser suite once with the window visible.
+- **Browser suite after polish: 22 / 22 pass** (window visible, no user input during the run), including the
+  shooter win in the page, 9 rapid switches leaving 0 listeners / 0 live sounds, and the loop holding ~60
+  updates/s. An earlier attempt stalled only because the window was hidden (browsers pause the game loop then).
 - **Not verified automatically:** mouse capture (pointer lock) in GHOUL SHIFT — browsers only allow it from a
   real click, so it needs a human check: click to aim, press Esc (should pause and free the mouse), Resume.
   Audio was exercised (correct sounds requested and stopped) but not listened to.
