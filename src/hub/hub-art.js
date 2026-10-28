@@ -1,0 +1,170 @@
+// Procedural pixel art for the arcade room and its cabinets.
+import { PAL } from '../core/palette.js';
+import { drawText } from '../core/font.js';
+
+const FLOOR_Y = 128;
+
+export function drawRoom(g, W, H, t) {
+  // Wall with vertical wallpaper stripes
+  g.fillStyle = PAL.night;
+  g.fillRect(0, 0, W, FLOOR_Y);
+  g.fillStyle = PAL.black;
+  for (let x = 6; x < W; x += 16) g.fillRect(x, 0, 2, FLOOR_Y);
+  // Ceiling lights
+  for (let x = 20; x < W; x += 56) {
+    g.fillStyle = PAL.grey;
+    g.fillRect(x, 0, 16, 2);
+    g.fillStyle = PAL.cream;
+    g.fillRect(x + 2, 2, 12, 1);
+  }
+  // Neon sign with an occasional flicker
+  const flicker = Math.sin(t * 17) > 0.96 || Math.sin(t * 3.1) > 0.995;
+  drawText(g, 'RETRO ARCADE', W / 2 + 1, 13, PAL.violet, { scale: 2, align: 'center' });
+  drawText(g, 'RETRO ARCADE', W / 2, 12, flicker ? PAL.indigo : PAL.sky, { scale: 2, align: 'center' });
+  // Baseboard + checkered floor
+  g.fillStyle = PAL.violet;
+  g.fillRect(0, FLOOR_Y - 2, W, 2);
+  for (let y = FLOOR_Y; y < H; y += 8) {
+    for (let x = 0; x < W; x += 16) {
+      g.fillStyle = ((x / 16 + (y - FLOOR_Y) / 8) & 1) ? PAL.indigo : PAL.black;
+      g.fillRect(x, y, 16, 8);
+    }
+  }
+}
+
+export function drawCabinet(g, x, y, w, h, machine, t, selected) {
+  const c = machine.colors;
+  // Selection glow
+  if (selected) {
+    g.fillStyle = Math.sin(t * 8) > 0 ? PAL.yellow : c.trim;
+    g.fillRect(x - 2, y - 2, w + 4, h + 4);
+  }
+  // Shadow on floor
+  g.fillStyle = PAL.black;
+  g.fillRect(x - 2, y + h - 1, w + 6, 3);
+  // Body and side shading
+  g.fillStyle = c.body;
+  g.fillRect(x, y, w, h);
+  g.fillStyle = c.dark;
+  g.fillRect(x + w - 4, y, 4, h);
+  // Marquee with the machine name
+  g.fillStyle = PAL.black;
+  g.fillRect(x + 2, y + 3, w - 8, 11);
+  drawText(g, machine.name, x + (w - 4) / 2, y + 6, selected ? PAL.yellow : c.trim, { align: 'center' });
+  // Screen bezel + animated attract screen
+  g.fillStyle = PAL.black;
+  g.fillRect(x + 4, y + 17, w - 12, 34);
+  const sx = x + 6, sy = y + 19, sw = w - 16, sh = 30;
+  g.save();
+  g.beginPath();
+  g.rect(sx, sy, sw, sh);
+  g.clip();
+  (SCREENS[machine.id] ?? staticScreen)(g, sx, sy, sw, sh, t);
+  g.restore();
+  // Control panel: joystick + buttons
+  g.fillStyle = c.trim;
+  g.fillRect(x + 1, y + 55, w - 6, 8);
+  g.fillStyle = PAL.black;
+  g.fillRect(x + 11, y + 51, 2, 5);
+  g.fillStyle = PAL.red;
+  g.fillRect(x + 10, y + 49, 4, 3);
+  g.fillStyle = PAL.cream;
+  g.fillRect(x + 28, y + 58, 3, 2);
+  g.fillRect(x + 34, y + 58, 3, 2);
+  // Coin door
+  g.fillStyle = c.dark;
+  g.fillRect(x + 17, y + 70, 16, 15);
+  g.fillStyle = PAL.yellow;
+  g.fillRect(x + 21, y + 74, 1, 5);
+  g.fillRect(x + 28, y + 74, 1, 5);
+  // Base
+  g.fillStyle = PAL.black;
+  g.fillRect(x, y + h - 3, w, 3);
+}
+
+const SCREENS = {
+  shooter(g, x, y, w, h, t) {
+    g.fillStyle = PAL.black;
+    g.fillRect(x, y, w, h);
+    // Corridor: ceiling, floor and receding wall bands
+    g.fillStyle = PAL.maroon;
+    g.fillRect(x, y + h / 2, w, h / 2);
+    for (let i = 0; i < 4; i++) {
+      const inset = i * 4;
+      g.fillStyle = i % 2 ? PAL.grey : PAL.indigo;
+      g.fillRect(x + inset, y + 4 + inset / 2, 3, h - 8 - inset);
+      g.fillRect(x + w - 3 - inset, y + 4 + inset / 2, 3, h - 8 - inset);
+    }
+    // Ghoul shambling closer
+    const s = 1 + ((t * 0.6) % 1);
+    const gx = x + w / 2 - 3 * s, gy = y + h / 2 - 4 * s;
+    g.fillStyle = PAL.green;
+    g.fillRect(gx, gy, 6 * s, 9 * s);
+    g.fillStyle = PAL.red;
+    g.fillRect(gx + 1 * s, gy + 2 * s, s, s);
+    g.fillRect(gx + 4 * s, gy + 2 * s, s, s);
+    // Blinking crosshair
+    if (Math.sin(t * 6) > -0.3) {
+      g.fillStyle = PAL.cream;
+      g.fillRect(x + w / 2 - 4, y + h / 2, 3, 1);
+      g.fillRect(x + w / 2 + 2, y + h / 2, 3, 1);
+      g.fillRect(x + w / 2, y + h / 2 - 4, 1, 3);
+      g.fillRect(x + w / 2, y + h / 2 + 2, 1, 3);
+    }
+  },
+  platformer(g, x, y, w, h, t) {
+    g.fillStyle = PAL.sky;
+    g.fillRect(x, y, w, h);
+    g.fillStyle = PAL.cream;
+    g.fillRect(x + ((t * 6) % (w + 12)) - 10, y + 4, 9, 3);
+    g.fillStyle = PAL.green;
+    g.fillRect(x, y + h - 6, w, 6);
+    g.fillStyle = PAL.forest;
+    g.fillRect(x, y + h - 2, w, 2);
+    g.fillStyle = PAL.brown;
+    g.fillRect(x + 22, y + 12, 12, 3);
+    // Coin
+    if (Math.sin(t * 5) > -0.5) {
+      g.fillStyle = PAL.yellow;
+      g.fillRect(x + 27, y + 7, 2, 3);
+    }
+    // Hopping pebble hero
+    const hop = Math.abs(Math.sin(t * 4)) * 12;
+    const px = x + 8, py = y + h - 11 - hop;
+    g.fillStyle = PAL.grey;
+    g.fillRect(px, py, 5, 5);
+    g.fillStyle = PAL.orange;
+    g.fillRect(px, py + 3, 5, 1);
+    g.fillStyle = PAL.black;
+    g.fillRect(px + 3, py + 1, 1, 1);
+  },
+  rpg(g, x, y, w, h, t) {
+    for (let ty = 0; ty < h; ty += 6) {
+      for (let tx = 0; tx < w; tx += 6) {
+        g.fillStyle = ((tx + ty) / 6) & 1 ? PAL.forest : PAL.night;
+        g.fillRect(x + tx, y + ty, 6, 6);
+      }
+    }
+    // Hero and NPC
+    g.fillStyle = PAL.orange;
+    g.fillRect(x + 10, y + 6, 4, 2);
+    g.fillStyle = PAL.cream;
+    g.fillRect(x + 10, y + 8, 4, 5);
+    g.fillStyle = PAL.violet;
+    g.fillRect(x + 22, y + 6, 4, 7);
+    // Dialogue box with blinking cursor
+    g.fillStyle = PAL.black;
+    g.fillRect(x + 1, y + h - 11, w - 2, 10);
+    g.fillStyle = PAL.cream;
+    g.fillRect(x + 3, y + h - 8, 12, 1);
+    g.fillRect(x + 3, y + h - 5, 18, 1);
+    if (Math.sin(t * 6) > 0) g.fillRect(x + w - 6, y + h - 5, 2, 2);
+  },
+};
+
+function staticScreen(g, x, y, w, h) {
+  for (let i = 0; i < 60; i++) {
+    g.fillStyle = Math.random() > 0.5 ? PAL.grey : PAL.night;
+    g.fillRect(x + Math.random() * w, y + Math.random() * h, 2, 1);
+  }
+}

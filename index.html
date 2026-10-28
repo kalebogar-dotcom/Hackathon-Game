@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Retro Arcade</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0d0d1a; overflow: hidden; }
+    body { display: flex; align-items: center; justify-content: center; }
+    canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; outline: none; }
+    #boot-error { position: fixed; top: 12px; left: 12px; right: 12px; color: #f4ecd0; font: 14px/1.5 monospace; }
+  </style>
+</head>
+<body>
+  <canvas id="screen" width="320" height="180" tabindex="0"></canvas>
+  <div id="boot-error" hidden></div>
+  <script>
+    // ES modules don't load from file:// — explain how to launch instead of showing a black screen.
+    if (location.protocol === 'file:') {
+      const el = document.getElementById('boot-error');
+      el.hidden = false;
+      el.textContent = 'This game must be served over http. In the project folder run: npm start  — then open http://localhost:8080';
+    }
+  </script>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

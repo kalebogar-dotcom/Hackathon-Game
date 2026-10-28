@@ -1,0 +1,13 @@
+{
+  "name": "retro-arcade",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Retro arcade hub with three playable minigames (browser, no dependencies).",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
