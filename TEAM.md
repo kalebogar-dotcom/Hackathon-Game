@@ -151,7 +151,25 @@ For **each** machine:
 - [ ] Switch between all three in a row → no stuck keys, no leftover sound, mouse released, speed normal
 - [ ] Console has no errors; `__arcade.manager.debug()` shows `listeners: 0` and `liveSounds: 0` in the hub
 
+Optional: a game may return `debug()` → plain object; it shows up in `__arcade.manager.debug().game`
+and is what the automated playtests read. It must not change state.
+
 ## Status log
 
 - Skeleton verified in browser: enter → pause → resume → finish (once) → play again → lose → return (mouse
   and keyboard) → re-enter; listeners and sounds drop to 0 on exit; single loop at ~60 fps.
+- **All three machines playable** (minimum scope met):
+  - GHOUL SHIFT — 3 waves (3/5/8), win and idle-loss both verified in browser and headless (bot: 16 kills, score 1700).
+  - PEBBLE JUMP — runner bot reaches the flag (score 240); walking into spikes loses after 3 lives.
+    Level tuned after playtests: moved a low platform that blocked the first spike jump, moved spikes that
+    sat too close to a pit and to the stair block, narrowed the last pit to 3 tiles.
+  - EMBER TALE — full quest (talk → slime appears → battle → report back) verified; balance over 40 runs:
+    attack-only wins 36 / loses 4, heal-when-low wins 40 / 40.
+- **Integration run in the real page: 21 / 21 checks pass** (no user input during the run): key and mouse
+  entry, Esc pause freezes updates and clears held keys, resume, real loss (shooter) and real wins
+  (platformer, RPG) recorded once, Play Again is a fresh instance, ESC MENU tag, return from pause and from
+  result screen, re-entry after a win is fresh, 9 rapid switches leave 0 listeners / 0 live sounds, loop
+  stays at 60 updates/s, hub shows CLEARED / BEST for every machine. No console errors.
+- **Not verified automatically:** mouse capture (pointer lock) in GHOUL SHIFT — browsers only allow it from a
+  real click, so it needs a human check: click to aim, press Esc (should pause and free the mouse), Resume.
+  Audio was exercised (correct sounds requested and stopped) but not listened to.
