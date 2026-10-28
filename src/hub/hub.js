@@ -52,7 +52,8 @@ export function createHub({ W, H, input, audio, machines, enter, info }) {
         else if (st.best !== null) { label = `BEST ${st.best}`; color = PAL.cream; }
         drawText(g, label, cx, ly + 15, color, { align: 'center', shadow: PAL.black });
       });
-      drawText(g, 'CLICK A MACHINE OR PRESS 1-3', W / 2, H - 7, PAL.cream, { align: 'center', shadow: PAL.black });
+      drawText(g, slots[selected].m.hint ?? '', W / 2, H - 16, PAL.sky, { align: 'center', shadow: PAL.black });
+      drawText(g, `CLICK A MACHINE OR PRESS 1-3    M: SOUND ${audio.muted ? 'OFF' : 'ON'}`, W / 2, H - 7, PAL.cream, { align: 'center', shadow: PAL.black });
     },
   };
 }

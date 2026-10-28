@@ -12,10 +12,25 @@ const PEBBLE = [
   '...kk.kk..',
 ];
 
+const BEETLE = [
+  '..kkkkk...',
+  '.kvvlvvk..',
+  'kvvvvvvvkk',
+  'kvvvvvvkyk',
+  'kkkkkkkkkk',
+  '.k.k..k.k.',
+];
+
 export function buildSprites(api) {
   const P = api.palette;
   const right = api.sprite(PEBBLE, { k: P.black, l: P.cream, g: P.grey, w: P.cream, o: P.orange });
-  return { pebbleRight: right, pebbleLeft: api.flipSprite(right) };
+  const beetleRight = api.sprite(BEETLE, { k: P.black, v: P.violet, l: P.cream, y: P.yellow });
+  return {
+    pebbleRight: right,
+    pebbleLeft: api.flipSprite(right),
+    beetleRight,
+    beetleLeft: api.flipSprite(beetleRight),
+  };
 }
 
 export function drawSky(g, P, W, H, camX, time) {

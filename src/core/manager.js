@@ -8,6 +8,7 @@ import { createMenu, drawPanel } from './ui.js';
 
 const TAG_LABEL = 'ESC MENU';
 const OVERLAY_INPUT_DELAY = 0.25; // seconds before an overlay accepts input (avoids instant re-selection)
+const WIPE_TIME = 0.32;           // hub <-> machine "blinds" transition
 
 export function createManager({ W, H, input, audio, machines, hub }) {
   const progress = {};
@@ -21,6 +22,7 @@ export function createManager({ W, H, input, audio, machines, hub }) {
   let current = null;   // the running machine: { machine, session, game, finished, crashed, result, pointerWanted, listeners }
   let overlay = null;   // { kind: 'pause' | 'result' | 'crash', menu, age, message }
   let sessions = 0;
+  let wipe = 0;         // seconds left in the transition
 
   window.addEventListener('blur', () => {
     if (mode === 'game' && current && !current.finished && !overlay) pause();
@@ -88,6 +90,7 @@ export function createManager({ W, H, input, audio, machines, hub }) {
     current = { machine, session: ++sessions, game: null, finished: false, crashed: false, result: null, pointerWanted: false, listeners: [] };
     mode = 'game';
     overlay = null;
+    wipe = WIPE_TIME;
     stats.entries++;
     progress[id].plays++;
     input.setCursor('default');
@@ -125,6 +128,7 @@ export function createManager({ W, H, input, audio, machines, hub }) {
   function exitToArcade() {
     stopCurrent();
     mode = 'hub';
+    wipe = WIPE_TIME;
     audio.play('blip');
   }
 
@@ -176,8 +180,9 @@ export function createManager({ W, H, input, audio, machines, hub }) {
   }
 
   function openOverlay(kind, extra = {}) {
+    const sound = { id: 'sound', label: () => `SOUND: ${audio.muted ? 'OFF' : 'ON'}` };
     const items = kind === 'pause'
-      ? [{ id: 'resume', label: 'RESUME' }, { id: 'restart', label: 'RESTART' }, { id: 'arcade', label: 'RETURN TO ARCADE' }]
+      ? [{ id: 'resume', label: 'RESUME' }, { id: 'restart', label: 'RESTART' }, { id: 'arcade', label: 'RETURN TO ARCADE' }, sound]
       : kind === 'result'
         ? [{ id: 'restart', label: 'PLAY AGAIN' }, { id: 'arcade', label: 'RETURN TO ARCADE' }]
         : [{ id: 'arcade', label: 'RETURN TO ARCADE' }];
@@ -195,6 +200,11 @@ export function createManager({ W, H, input, audio, machines, hub }) {
 
   function update(dt) {
     stats.frames++;
+    wipe = Math.max(0, wipe - dt);
+    if (input.wasPressed('KeyM')) {
+      input.consume('KeyM');
+      if (!audio.toggleMute()) audio.play('blip');
+    }
     if (mode === 'hub') {
       hub.update(dt);
       return;
@@ -207,6 +217,7 @@ export function createManager({ W, H, input, audio, machines, hub }) {
       if (choice === 'resume') resume();
       else if (choice === 'restart') restart();
       else if (choice === 'arcade') exitToArcade();
+      else if (choice === 'sound' && !audio.toggleMute()) audio.play('blip');
       return;
     }
     if (input.wasPressed('Escape') || tagClicked()) {
@@ -227,6 +238,7 @@ export function createManager({ W, H, input, audio, machines, hub }) {
     g.imageSmoothingEnabled = false;
     if (mode === 'hub') {
       hub.draw(g);
+      drawWipe(g);
       return;
     }
     g.fillStyle = PAL.black;
@@ -242,6 +254,19 @@ export function createManager({ W, H, input, audio, machines, hub }) {
     }
     if (overlay) drawOverlay(g);
     else drawTag(g);
+    drawWipe(g);
+  }
+
+  // Black "blinds" that open from the top down, staggered per band.
+  function drawWipe(g) {
+    if (wipe <= 0) return;
+    const k = wipe / WIPE_TIME;
+    const bands = 10, bh = H / bands;
+    g.fillStyle = PAL.black;
+    for (let i = 0; i < bands; i++) {
+      const cover = Math.min(1, k * 1.6 - (bands - 1 - i) * 0.06);
+      if (cover > 0) g.fillRect(0, Math.floor(i * bh), W, Math.ceil(bh * cover));
+    }
   }
 
   function drawTag(g) {
@@ -260,7 +285,7 @@ export function createManager({ W, H, input, audio, machines, hub }) {
     g.fillRect(0, 0, W, H);
     g.globalAlpha = 1;
     const pw = 168;
-    const ph = o.kind === 'result' ? 90 : o.kind === 'crash' ? 72 : 78;
+    const ph = o.kind === 'result' ? 90 : o.kind === 'crash' ? 72 : 89;
     const px = Math.round((W - pw) / 2);
     const py = Math.round((H - ph) / 2);
     drawPanel(g, px, py, pw, ph);

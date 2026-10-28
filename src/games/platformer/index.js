@@ -15,6 +15,9 @@ const COYOTE_TIME = 0.08;   // can still jump just after leaving a ledge
 const JUMP_BUFFER = 0.12;   // jump pressed just before landing still counts
 const RESPAWN_DELAY = 0.9;
 const JUMP_KEYS = ['Space', 'KeyW', 'ArrowUp', 'KeyK'];
+const BEETLE_SPEED = 22;
+const STOMP_BOUNCE = 220;
+const STOMP_POINTS = 25;
 
 export function createGame(api) {
   const { W, H, palette: P, input, audio } = api;
@@ -27,8 +30,10 @@ export function createGame(api) {
   let start = { x: 1, y: rows - 3 };
   let flag = null;
   let totalCoins = 0;
+  const beetles = [];
   tiles.forEach((row, y) => row.forEach((c, x) => {
     if (c === 'P') { start = { x, y }; row[x] = '.'; }
+    else if (c === 'e') { beetles.push({ x: x * T + 1, y: y * T + T - 6, w: 8, h: 6, vx: -BEETLE_SPEED, alive: true, squash: 0 }); row[x] = '.'; }
     else if (c === 'F') flag = { x: x * T + 2, y: (y - 6) * T, w: 6, h: 7 * T };
     else if (c === 'o') totalCoins++;
   }));
@@ -42,6 +47,7 @@ export function createGame(api) {
 
   const player = { x: 0, y: 0, w: 8, h: 9, vx: 0, vy: 0, facing: 1 };
   let coins = 0;
+  let stomps = 0;
   let lives = START_LIVES;
   let coyote = 0, buffer = 0, dead = 0, invuln = 0, time = 0, camX = 0;
   let over = false;
@@ -60,10 +66,40 @@ export function createGame(api) {
     audio.play('hurt');
     if (lives <= 0) {
       over = true;
-      api.finish({ won: false, score: coins * 10 });
+      api.finish({ won: false, score: coins * 10 + stomps * STOMP_POINTS });
       return;
     }
     dead = RESPAWN_DELAY;
+  }
+
+  // Beetles patrol, turning at walls, spikes and ledges.
+  function updateBeetles(dt) {
+    for (const b of beetles) {
+      if (!b.alive) { b.squash = Math.max(0, b.squash - dt); continue; }
+      const nx = b.x + b.vx * dt;
+      const frontCol = Math.floor((b.vx < 0 ? nx : nx + b.w) / T);
+      const row = Math.floor((b.y + b.h - 1) / T);
+      const blocked = solid(frontCol, row) || tiles[row]?.[frontCol] === '^' || !solid(frontCol, row + 1);
+      if (blocked) b.vx = -b.vx;
+      else b.x = nx;
+    }
+  }
+
+  // Landing on a beetle stomps it; any other touch hurts.
+  function touchBeetles() {
+    for (const b of beetles) {
+      if (!b.alive || !overlaps(player, b)) continue;
+      if (player.vy > 0 && player.y + player.h - b.y < 8) {
+        b.alive = false;
+        b.squash = 0.5;
+        stomps++;
+        player.vy = -STOMP_BOUNCE;
+        audio.play('hit');
+      } else if (invuln <= 0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function touchTiles() {
@@ -88,6 +124,7 @@ export function createGame(api) {
     update(dt) {
       if (over) return;
       time += dt;
+      updateBeetles(dt);
       if (dead > 0) {
         dead -= dt;
         if (dead <= 0) respawn();
@@ -120,10 +157,10 @@ export function createGame(api) {
       if (hit.hitX) player.vx = 0;
       if (hit.hitY) player.vy = 0;
 
-      if (touchTiles() === 'spike' || player.y > rows * T + 12) { die(); return; }
+      if (touchTiles() === 'spike' || touchBeetles() || player.y > rows * T + 12) { die(); return; }
       if (flag && overlaps(player, flag)) {
         over = true;
-        api.finish({ won: true, score: coins * 10 + lives * 50 });
+        api.finish({ won: true, score: coins * 10 + stomps * STOMP_POINTS + lives * 50 });
         return;
       }
 
@@ -139,6 +176,17 @@ export function createGame(api) {
         for (let c = c0; c <= c1; c++) {
           const ch = tiles[r][c];
           if (ch !== '.') drawTile(g, P, ch, c * T - cx, r * T, T, tiles[r - 1]?.[c], time);
+        }
+      }
+
+      for (const b of beetles) {
+        const bx = Math.round(b.x - 1 - cx);
+        if (bx < -12 || bx > W) continue;
+        if (b.alive) {
+          g.drawImage(b.vx < 0 ? art.beetleLeft : art.beetleRight, bx, Math.round(b.y));
+        } else if (b.squash > 0) {
+          g.fillStyle = P.violet;
+          g.fillRect(bx, Math.round(b.y + b.h - 2), 10, 2);
         }
       }
 
@@ -170,7 +218,8 @@ export function createGame(api) {
       return {
         player: { x: player.x, y: player.y, vx: player.vx, vy: player.vy },
         grounded: isGrounded(player, solid, T),
-        coins, totalCoins, lives, dead, over,
+        enemies: beetles.map(b => ({ x: b.x, y: b.y, alive: b.alive })),
+        coins, totalCoins, stomps, lives, dead, over,
       };
     },
   };

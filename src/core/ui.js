@@ -12,8 +12,11 @@ export function drawPanel(g, x, y, w, h, fill = PAL.night, border = PAL.cream) {
   g.fillRect(x, y, w, h);
 }
 
+const labelOf = it => (typeof it.label === 'function' ? it.label() : it.label);
+
 /**
- * Vertical menu. items: [{ id, label }]. update(input) returns the chosen id or null.
+ * Vertical menu. items: [{ id, label }] (label may be a function for live text).
+ * update(input) returns the chosen id or null.
  * Up/Down or W/S move, Enter/Space choose, mouse hover highlights, click chooses.
  */
 export function createMenu(items, audio = null) {
@@ -37,7 +40,7 @@ export function createMenu(items, audio = null) {
     },
     /** Draws the items centered on cx starting at y; returns the height used. */
     draw(g, cx, y) {
-      const w = Math.max(...items.map(it => textWidth(it.label))) + 16;
+      const w = Math.max(...items.map(it => textWidth(labelOf(it)))) + 16;
       rects = items.map((it, i) => ({ x: Math.round(cx - w / 2), y: y + i * ROW - 3, w, h: ROW }));
       items.forEach((it, i) => {
         const r = rects[i];
@@ -47,7 +50,7 @@ export function createMenu(items, audio = null) {
           g.fillRect(r.x, r.y, r.w, r.h - 1);
           drawText(g, '>', r.x + 3, r.y + 3, PAL.yellow);
         }
-        drawText(g, it.label, cx, r.y + 3, on ? PAL.yellow : PAL.cream, { align: 'center' });
+        drawText(g, labelOf(it), cx, r.y + 3, on ? PAL.yellow : PAL.cream, { align: 'center' });
       });
       return items.length * ROW;
     },
