@@ -10,12 +10,12 @@ export const MACHINES = [
     colors: { body: PAL.maroon, trim: PAL.red, dark: PAL.black },
     load: () => import('./games/shooter/index.js'),
   },
-  {
+    {
     id: 'platformer',
-    name: 'PEBBLE JUMP',
-    genre: 'PLATFORMER',
-    hint: 'A D / ARROWS RUN  SPACE / W JUMP  STOMP BEETLES',
-    colors: { body: PAL.blue, trim: PAL.yellow, dark: PAL.night },
+    name: 'PIXEL CHIC',
+    genre: 'DRESS-UP',
+    hint: 'UP DOWN PICK  LEFT RIGHT CHANGE  C COLOR  X SWAP  ENTER DONE',
+    colors: { body: PAL.violet, trim: PAL.yellow, dark: PAL.night },
     load: () => import('./games/platformer/index.js'),
   },
   {
