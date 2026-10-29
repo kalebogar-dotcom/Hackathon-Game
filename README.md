@@ -34,7 +34,7 @@ Then open **http://localhost:8080**. Stop the server with `Ctrl+C`.
 | Arcade | Click a cabinet, or press **1 / 2 / 3**, or **Left/Right + Enter** |
 | Every machine | **Esc** (or click **ESC MENU** top-right) → Resume / Restart / Return to Arcade / Sound |
 | Anywhere | **M** toggles sound |
-| Bear in the Red Woods | **Enter / click** start · **WASD** move · **mouse** aim (click to capture the mouse) or **Left/Right** turn · **Click / Space** fire (SMG: hold) · **E** buy wall gun · **1 2 3 / Q** switch gun |
+| Bear in the Red Woods | **Enter / click** start · **WASD** move · **mouse** aim (click to capture the mouse) or **Left/Right** turn · **Click / Space** fire (SMG: hold) · **E** buy wall gun · **hold E** repair a window · **1 2 3 / Q** switch gun |
 | Pixel Chic | **Up/Down** pick a category · **Left/Right** change it · **C** color · **X** swap model · **Enter** next / done |
 | Ember Tale | **WASD / Arrows** walk · **Space / Enter / E** talk & confirm · battle menu: Up/Down + Enter or click |
 
@@ -47,7 +47,10 @@ The arcade remembers each machine's **CLEARED** status and **BEST** score for th
   - **SPLIT-BARREL** shotgun — 400 — outside, on the front wall right of the door. 7-pellet spread.
   - **SAWMILL SMG** — 750 — inside, on the back wall. Full-auto.
 - Ammo is unlimited; health regenerates after a few seconds without being hit.
-- Zombies path around trees and walls and come into the cabin through the door and two window gaps.
+- Zombies path around trees and walls and come into the cabin through the door and two windows.
+- **Barricades:** both cabin windows start with 5 boards. Boards stop bodies but not bullets. A zombie at a boarded window stops and tears off one board every 1.3 s, and only climbs in once the last board is gone; the bear smashes a whole window in one blow. **Hold E** near a window to hammer boards back, one every 0.9 s (+10 pts each, at most 50 pts per window per wave). If a wall gun is also in range, E buys the gun instead; a repair only starts on a fresh E press. You cannot board up a window someone is standing in.
+- **Breaks:** after waves 1 and 2 there is a 12-second break with no zombies. The top of the screen shows the next wave and a countdown (with ticks at 3-2-1). Buy guns and repair windows. The arcade's pause freezes the countdown.
+- **Bear warning:** in the last 4.5 seconds of the break before wave 3 you hear heavy footsteps and a distant roar, the screen rumbles slightly and "SOMETHING IS IN THE WOODS..." appears. It plays once per bear appearance, pauses with the game and respects mute.
 - **The red bear** arrives in wave 3 with a health bar at the top. When it rears up with a red **!** ("CHARGE INCOMING!") it is about to dash in a straight line — step aside. It is stunned if it hits a wall or tree, and waits 5 seconds between charges.
 - **Win:** kill the bear and every zombie in wave 3. **Lose:** health reaches 0. A short end card shows, then the arcade's PLAY AGAIN / RETURN TO ARCADE menu.
 
@@ -78,7 +81,7 @@ npm test
 ```
 
 1. `tests/run-headless.mjs` plays all three machines headlessly with scripted bots (`tests/bots.js`): each must be winnable, losable or finishable, must not end on its own while idle, and `finish` must fire exactly once. The Bear bot plays with keys only — it turns, fires, walks to both wall guns and buys them, backs away from zombies and the bear, and strafes when the bear winds up a charge. It wins about 2 runs in 3, so the test uses three fixed random seeds.
-2. `tests/bear-unit.mjs` checks Bear in the Red Woods directly: map and pathfinding, purchases (points deducted only on success), pistol / shotgun / SMG firing behavior, zombies entering the cabin only through openings, the bear's telegraphed charge and cooldown, and the `finish` handoff.
+2. `tests/bear-unit.mjs` checks Bear in the Red Woods directly: map and pathfinding, purchases (points deducted only on success), pistol / shotgun / SMG firing behavior, zombies entering the cabin only through openings, the bear's telegraphed charge and cooldown, barricades (tearing, entry only after the last board, repairs, reward cap, gun priority, fresh-press rule, blocked windows, bear smash, two zombies at one window), wave breaks (length, no spawns, single advance, ticks, buying and repairing), the bear warning (timing, order, once only) and restart resets, and the `finish` handoff.
 
 In-browser integration suite (game open at http://localhost:8080, window visible, hands off the game for ~3–6 minutes — the Bear win plays in real time):
 

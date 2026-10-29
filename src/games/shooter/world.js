@@ -3,15 +3,16 @@
 // F tree line (wall)     T single tree (sprite, trunk blocks)   L log cabin wall   C crate
 // 1 shotgun on a wall    2 SMG on a wall                          . ground
 // P player start (facing north)                                   S zombie spawn
+// B cabin window with a barricade (walkable gap; blocks bodies while it has boards)
 export const MAP = Object.freeze([
   'FFFFFFFFFFFFFFFFFFFFFFFF',
   'F..S.......T.......S...F',
   'F.....T..........T.....F',
   'F.T..................T.F',
-  'F......LLLL.L2LLL......F',
+  'F......LLLLBL2LLL......F',
   'F..T...L........L....T.F',
   'F......L..C.....L......F',
-  'FS.....L............T.SF',
+  'FS.....L........B...T.SF',
   'F......LC.......L......F',
   'F.T....L........L..T...F',
   'F......LLLL..L1LL......F',
@@ -29,8 +30,17 @@ export const MAP_H = MAP.length;
 
 const SOLID = new Set(['F', 'L', 'C', '1', '2']);
 export const tileAt = (tx, ty) => MAP[ty]?.[tx] ?? 'F';
+/** Static walls only: used by rays, so shots and the raycaster see straight through barricades. */
 export const isWallTile = (tx, ty) => SOLID.has(tileAt(tx, ty));
-export const isWall = (x, y) => isWallTile(Math.floor(x), Math.floor(y));
+
+// Boarded windows block movement. The running game registers its own check (one game runs at a time).
+let boarded = () => false;
+export function setBoardedCheck(fn) { boarded = fn ?? (() => false); }
+/** Collision: static walls plus windows that still have boards. */
+export const isWall = (x, y) => {
+  const tx = Math.floor(x), ty = Math.floor(y);
+  return isWallTile(tx, ty) || boarded(tx, ty);
+};
 /** Tiles enemies path through: not a wall and not a tree. */
 export const isWalkableTile = (tx, ty) => { const t = tileAt(tx, ty); return !SOLID.has(t) && t !== 'T'; };
 
@@ -53,6 +63,12 @@ function mount(ch, weapon, face) {
 }
 // Each wall gun: the tile it hangs on, the face it shows on, and (fx, fy) the middle of that face.
 export const WALL_BUYS = Object.freeze([mount('1', 'shotgun', 'S'), mount('2', 'smg', 'S')]);
+
+// Each window: its tile, center, and axis — 'x' when it sits in an east-west wall (boards run along x).
+export const WINDOWS = Object.freeze(findTiles('B').map(t => Object.freeze({
+  x: t.x, y: t.y, cx: t.x + 0.5, cy: t.y + 0.5,
+  axis: isWallTile(t.x - 1, t.y) && isWallTile(t.x + 1, t.y) ? 'x' : 'y',
+})));
 
 /** Move a circle by (dx, dy), sliding along walls and trunks. Returns true if anything blocked it. */
 export function moveCircle(body, dx, dy, r) {

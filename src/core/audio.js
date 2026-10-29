@@ -33,6 +33,15 @@ const SOUNDS = {
   charge: [{ type: 'noise', f: [400, 60], d: 0.5, v: 0.35 }, { type: 'square', f: [60, 40], d: 0.5, v: 0.15 }],
   thud: [{ type: 'noise', f: [500, 40], d: 0.4, v: 0.4 }, { type: 'sine', f: [80, 30], d: 0.4, v: 0.3 }],
   bearDie: [{ type: 'sawtooth', f: [120, 30], d: 1.2, v: 0.25 }, { type: 'noise', f: [1200, 60], d: 1.0, v: 0.3 }],
+  board: [note(230, 0, 0.05, 'square', 0.13), { type: 'noise', f: [2600, 700], d: 0.06, v: 0.2 }, note(270, 0.11, 0.05, 'square', 0.12), { type: 'noise', f: [2600, 700], d: 0.06, v: 0.18, t: 0.11 }],
+  boardBreak: [{ type: 'noise', f: [3800, 200], d: 0.22, v: 0.32 }, { type: 'square', f: [320, 90], d: 0.12, v: 0.1 }],
+  bearStep: [{ type: 'sine', f: [72, 36], d: 0.34, v: 0.42 }, { type: 'noise', f: [240, 40], d: 0.24, v: 0.26 }],
+  bearCall: [
+    { type: 'sawtooth', f: [170, 120], d: 0.35, v: 0.18 },
+    { type: 'sawtooth', f: [140, 55], d: 1.2, v: 0.22, t: 0.3 },
+    { type: 'square', f: [85, 42], d: 1.3, v: 0.09, t: 0.3 },
+    { type: 'noise', f: [520, 80], d: 1.4, v: 0.16, t: 0.2 },
+  ],
 };
 
 export const SOUND_NAMES = Object.freeze(Object.keys(SOUNDS));
