@@ -11,7 +11,7 @@ crimson-forest palette (`src/games/shooter/config.js`); its cabinet in the hub u
 
 | Machine | Scope | Win | Lose | Score (integer, higher is better) |
 |---|---|---|---|---|
-| BEAR IN THE RED WOODS (shooter) | Forest clearing + enterable log cabin, title screen, pistol + 2 wall-buy guns (Split-Barrel shotgun 400, Sawmill SMG 750), points, 3 waves (6/10/8 zombies), bear boss in wave 3 with health bar and telegraphed charge | Kill the bear and every zombie in wave 3 | Health 0 | Points earned: `+10` per hit, `+60` per zombie, `+500` for the bear (spending does not lower the score) |
+| BEAR IN THE RED WOODS (shooter) | Forest clearing + enterable log cabin, title screen, pistol + 2 wall-buy guns (Split-Barrel shotgun 400, Sawmill SMG 750), points, 3 waves (6/10/8 zombies) with 12 s breaks, two repairable window barricades, bear boss in wave 3 with a warning, health bar and telegraphed charge | Kill the bear and every zombie in wave 3 | Health 0 | Points earned: `+10` per hit, `+60` per zombie, `+500` for the bear (spending does not lower the score) |
 | PIXEL CHIC (platformer slot) | Dress-up: pick a model, change clothes and colors, take the photo | Finish the photo | — (cannot lose) | `100 + items equipped × 10` |
 | EMBER TALE (rpg) | One room, one NPC, short talk, one turn-based battle (Attack / Heal), report back | Report back after winning the battle | HP 0 in battle | `100 + HP remaining × 10` (on loss: `0`) |
 
@@ -54,7 +54,11 @@ Bear in the Red Woods (`src/games/shooter/`) uses its own module names:
 | `world.js` | Map data (24×19 tiles, legend in the file), collision, hitscan rays, breadth-first pathfinding for enemies |
 | `render.js` | Raycaster, billboard sprites, held gun, HUD, title and end card (text via `api.text`) |
 | `sprites.js` | All pixel art, built with `api.sprite` at 4 fog levels; cached across runs because it never changes |
-| `config.js` | The game's palette and every tuning number (weapons, zombies, bear, waves) — balance changes go here only |
+| `config.js` | The game's palette and every tuning number (weapons, zombies, bear, waves, `INTERMISSION` break length, `BARRICADE` boards/speeds/rewards/caps, `BEAR_WARNING` timing) — balance changes go here only |
+
+Barricades and collision: windows are `B` tiles in `world.js`. Rays (`isWallTile`) ignore boards so shots and
+the raycaster see through; movement (`isWall`) also asks the running game whether a window still has boards
+(`setBoardedCheck`, re-registered every frame and cleared in `destroy()`).
 
 Arcade adaptation: the game has no pause screen, mute or restart of its own (the arcade owns Esc, M and
 Play Again). When a run ends it shows its win/lose card for 1.6 s, then calls `api.finish({ won, score })`.
@@ -141,7 +145,7 @@ Held keys and mouse state are **cleared** on enter, pause, resume, finish, resta
 
 `select blip talk pause shoot hit hurt explode jump coin heal wave win lose`
 
-Bear in the Red Woods adds: `pistol shotgun smg bearHit zdie groan buy equip deny clear roar charge thud bearDie`
+Bear in the Red Woods adds: `pistol shotgun smg bearHit zdie groan buy equip deny clear roar charge thud bearDie board boardBreak bearStep bearCall`
 
 The arcade plays `select` on enter, `pause` on pause, and `win`/`lose` on finish — games don't need to.
 All sounds are stopped automatically on pause, finish, restart and exit. Unknown names log a warning.
@@ -216,3 +220,18 @@ and is what the automated playtests read. It must not change state.
     ESC MENU tag; EMBER TALE quest; 9 rapid switches leave 0 listeners / 0 live sounds; ~60 updates/s.
   - Still needs a human: mouse capture in Bear (click to aim, Esc frees the mouse and pauses, Resume
     re-captures) and listening to the new sounds.
+- **Bear: barricades, wave breaks, bear warning** (branch `bear-barricades-breaks-warning`, not pushed):
+  - `npm test`: headless **10 / 10**; Bear unit checks all pass, including new checks for barricade
+    tearing and entry, repairs, reward cap and reset, gun priority, the fresh-press rule, blocked windows,
+    the bear smashing a window, two zombies at one window, breaks (length, no spawns, single advance,
+    ticks, buying/repairing), the warning (timing, order, once only) and restart resets.
+  - Two navigation bugs found by the tests and fixed: zombies could pin each other against the jambs of a
+    one-tile window, and the close-range straight chase could scrape a wall corner and stall.
+  - Browser (real page): boards render across the windows; zombies tear in and E repairs (+10, hammer sound);
+    break countdown shows and freezes under the arcade's pause; the warning shows, freezes under pause, is
+    silent while muted (M key) and leaves no sounds after Restart or Return to Arcade; re-entry is clean.
+    Browser suite: 22 / 25 in one run (the 3 misses were one ordinary bot loss plus a real click and window
+    blur that paused the game); the Bear win section was rerun on its own with no user input and won on
+    attempt 2; return to hub and all-three progress then passed. The page was often throttled by the OS
+    (window not in front), so parts were driven by stepping frames manually or with a timer-driven loop.
+  - Still needs a human: listening to the new sounds (footsteps, roar, hammer, board crack).
