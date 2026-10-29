@@ -11,6 +11,15 @@ function stubContext() {
   });
 }
 
+// Minimal offscreen-canvas DOM so machines that pre-render sprites with document.createElement('canvas') run in Node.
+function stubCanvas() {
+  const ctx = stubContext();
+  ctx.getImageData = (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h });
+  return { width: 0, height: 0, getContext: () => ctx, toDataURL: () => 'data:image/png;base64,' };
+}
+globalThis.document ??= { createElement: () => stubCanvas(), body: { appendChild() {} } };
+globalThis.ImageData ??= class { constructor(data, width, height) { Object.assign(this, { data, width, height }); } };
+
 export async function runGame(id, bot, { seconds = 180, dt = 1 / 60, drawEvery = 10 } = {}) {
   const mod = await import(new URL(`../src/games/${id}/index.js`, import.meta.url));
   const held = new Set();

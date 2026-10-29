@@ -1,7 +1,6 @@
 // Scripted players for the automated playtests (headless and in-browser).
 // A bot is (state, ctl, t) => void, called every tick with the game's debug() snapshot.
 // ctl.hold(code, on) sets whether a key is held (persists until changed); ctl.tap(code) presses once.
-import { LEVEL, TILE } from '../src/games/platformer/level.js';
 import { ROOM, SOLID } from '../src/games/rpg/map.js';
 
 const ARROWS = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
@@ -28,26 +27,35 @@ export function shooterTurret() {
   };
 }
 
-/** PEBBLE JUMP: run right, jump over spikes, pits, blocks and beetles just ahead. */
-export function platformerRunner() {
-  const at = (c, r) => LEVEL[r]?.[c] ?? '#';
-  const hazard = c => at(c, 15) === '^' || at(c, 16) === '.';
-  const block = c => at(c, 15) === '#' || at(c, 14) === '#';
-  let jumpUntil = -1;
+/** PIXEL CHIC: pick a character, style an outfit, dance at the party, then finish from the photo screen.
+ *  halloween: wear a costume, then flip THEME back to NORMAL (the costume should keep it spooky). */
+export function pixelChicStylist({ halloween = false } = {}) {
+  const studio = halloween
+    ? ['ArrowUp', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowRight', 'Enter'] // COSTUME -> first costume, THEME -> normal
+    : ['ArrowRight', ...Array(12).fill('ArrowDown'), 'ArrowRight', 'Enter'];   // change hair, apply first preset
+  let step = 0, readyAt = 0.4, partyAt = -1, finished = false;
   return (s, ctl, t) => {
-    ctl.hold('ArrowRight', true);
-    if (!s || s.dead > 0) { ctl.hold('Space', false); jumpUntil = -1; return; }
-    if (jumpUntil >= 0) {
-      if (t >= jumpUntil) { ctl.hold('Space', false); jumpUntil = -1; }
+    if (!s || finished || t < readyAt) return;
+    readyAt = t + 0.15;
+    if (s.screen === 'select') { ctl.tap('Enter'); readyAt = t + 0.3; return; }
+    if (s.screen === 'studio') { if (step < studio.length) ctl.tap(studio[step++]); return; }
+    if (s.screen === 'party') {
+      if (partyAt < 0) partyAt = t;
+      if (t - partyAt > 2.6) ctl.tap('Enter');
       return;
     }
-    const front = s.player.x + 8;
-    const c1 = Math.floor((front + 6) / TILE);
-    const beetle = (s.enemies ?? []).some(e => e.alive && e.x - front > -2 && e.x - front < 18 && Math.abs(e.y - s.player.y) < 12);
-    if (s.grounded && (hazard(c1) || block(c1) || block(c1 + 1) || beetle)) {
-      ctl.hold('Space', true);
-      jumpUntil = t + 0.3;
-    }
+    if (s.screen === 'photo') { ctl.tap('Enter'); finished = true; }
+  };
+}
+
+/** PIXEL CHIC: go to the party, then leave it with B; should land back in the studio without finishing. */
+export function pixelChicPartyHopper() {
+  let readyAt = 0.4, partyAt = -1;
+  return (s, ctl, t) => {
+    if (!s || t < readyAt) return;
+    readyAt = t + 0.3;
+    if (s.screen === 'select' || (s.screen === 'studio' && partyAt < 0)) ctl.tap('Enter');
+    else if (s.screen === 'party') { if (partyAt < 0) partyAt = t; if (t - partyAt > 3) ctl.tap('KeyB'); }
   };
 }
 
@@ -92,11 +100,6 @@ export function rpgQuester({ heal = true } = {}) {
     if (mv.face) { ctl.hold(mv.face, true); talkNext = s.quest !== 'hunt'; return; }
     ctl.hold(mv, true);
   };
-}
-
-/** Walks right forever (into the first hazard every life). */
-export function walkRight() {
-  return (s, ctl) => ctl.hold('ArrowRight', true);
 }
 
 export function idle() {

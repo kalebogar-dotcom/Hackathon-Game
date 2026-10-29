@@ -1,6 +1,6 @@
 // PIXEL CHIC (Machine #2): dress-up studio, Halloween special, disco party, prizes, photo + PNG download.
 import { SKINS, EYE_COLORS, HAIR_COLORS, CLOTH_COLORS, HAIR, SLOT_ITEMS, PRESETS, COSTUMES, DEFAULT_LOOKS } from './items.js';
-import { drawLook, drawPrize, exportPng, PRIZE_H } from './sprites.js';
+import { drawLook, drawPrize, exportPng, PRIZE_W, PRIZE_H } from './sprites.js';
 
 const SLOTS = ['top', 'bottom', 'dress', 'outer', 'shoes', 'hat', 'back', 'acc'];
 const POP_TIME = 0.18;
@@ -332,4 +332,104 @@ export function createGame(api) {
     button(g, 148, 152, 40, 12, 'SWAP X');
     button(g, 192, 152, 40, 12, 'COLOR C');
     button(g, 264, 152, 48, 12, 'DONE');
-    api.text(g, 'UP DOWN PICK  LEFT RIGHT
+    api.text(g, 'UP DOWN PICK  LEFT RIGHT CHANGE', 232, 168, pal.grey, { align: 'center' });
+    api.text(g, 'C COLOR  X SWAP  H THEME  ENTER DONE', 232, 174, pal.grey, { align: 'center' });
+  }
+
+  function drawParty(g) {
+    const hal = spooky();
+    const beat = Math.floor(partyT * 2);
+    g.fillStyle = hal ? pal.black : pal.night; g.fillRect(0, 0, 320, 180);
+    // light beams sweeping from the ceiling
+    const beams = hal ? [pal.violet, pal.orange, pal.green] : [pal.red, pal.sky, pal.yellow, pal.green];
+    g.globalAlpha = 0.25;
+    beams.forEach((c, i) => {
+      const sx = 40 + i * (240 / (beams.length - 1));
+      const ex = 160 + Math.sin(partyT * 1.5 + i * 2) * 140;
+      g.fillStyle = c;
+      for (let y = 0; y < 132; y += 4) g.fillRect(Math.round(sx + (ex - sx) * (y / 132)) - 1 - y / 12, y, 3 + y / 6, 4);
+    });
+    g.globalAlpha = 1;
+    if (hal) {
+      g.fillStyle = pal.cream; g.fillRect(268, 14, 14, 14); g.fillRect(266, 16, 18, 10);
+      drawSpooks(g, true);
+    } else {
+      // disco ball
+      g.fillStyle = pal.grey; g.fillRect(159, 0, 1, 8);
+      for (let y = 0; y < 10; y++) {
+        for (let x = 0; x < 10; x++) {
+          if ((x - 4.5) ** 2 + (y - 4.5) ** 2 > 25) continue;
+          g.fillStyle = (x + y + beat) % 3 === 0 ? pal.cream : (x + y) % 2 ? pal.grey : pal.sky;
+          g.fillRect(155 + x, 8 + y, 1, 1);
+        }
+      }
+    }
+    // checkered dance floor that flashes on the beat
+    const tiles = hal ? [pal.violet, pal.maroon, pal.orange] : [pal.red, pal.blue, pal.yellow, pal.green, pal.violet];
+    for (let y = 132; y < 180; y += 8) {
+      for (let x = 0; x < 320; x += 16) {
+        const k = x / 16 + (y - 132) / 8;
+        g.fillStyle = (k + beat) % 2 ? tiles[(k + beat) % tiles.length] : pal.black;
+        g.fillRect(x, y, 16, 8);
+      }
+    }
+    for (const f of confetti) { g.fillStyle = f.c; g.fillRect(Math.round(f.x), Math.round(f.y), 2, 2); }
+
+    const dance = Math.round(Math.abs(Math.sin(partyT * Math.PI * 2)) * 4);
+    const sway = Math.round(Math.sin(partyT * Math.PI) * 6);
+    drawLook(g, pal, cur(), 121 + sway, 24 - dance, 3, blinking > 0);
+    if (hal) { pumpkinSprite(g, 40, 124); pumpkinSprite(g, 270, 124); }
+
+    api.text(g, hal ? 'MONSTER MASH!' : 'DISCO PARTY!', 160, 6, pal.yellow, { scale: 2, align: 'center', shadow: pal.black });
+    if (partyT > 2.2) {
+      const px = 238, py = 132 - PRIZE_H * 3;
+      g.fillStyle = pal.cream; g.fillRect(px - 4, 130, PRIZE_W * 3 + 8, 4);
+      drawPrize(g, pal, prizeKind(), prizeColor(), px, py + (beat % 2), 3);
+      api.text(g, 'YOU WON A PRIZE!', 259, py - 16, pal.cream, { align: 'center', shadow: pal.black });
+      api.text(g, prizeKind() === 'ghost' ? 'GHOST PLUSH' : 'TEDDY BEAR', 259, py - 9, pal.yellow, { align: 'center', shadow: pal.black });
+    } else {
+      api.text(g, 'DANCE IT OUT...', 259, 70, pal.cream, { align: 'center', shadow: pal.black });
+    }
+    drawSparks(g);
+    button(g, 8, 163, 100, 13, 'PHOTO  ENTER');
+    button(g, 212, 163, 100, 13, 'STUDIO  B');
+  }
+
+  function drawPhoto(g) {
+    const hal = spooky();
+    g.fillStyle = hal ? pal.black : pal.indigo; g.fillRect(0, 0, 320, 180);
+    g.fillStyle = pal.night; for (let x = 8; x < 320; x += 16) g.fillRect(x, 0, 2, 180);
+    if (hal) drawSpooks(g, true);
+    g.fillStyle = pal.black; g.fillRect(24, 18, 120, 152);           // shadow
+    g.fillStyle = pal.cream; g.fillRect(20, 14, 120, 152);           // frame
+    g.fillStyle = hal ? pal.maroon : pal.violet; g.fillRect(26, 20, 108, 118); // photo
+    drawLook(g, pal, cur(), 30, 18, 3, blinking > 0);
+    drawPrize(g, pal, prizeKind(), prizeColor(), 104, 136 - PRIZE_H * 2, 2);
+    drawSparks(g);
+    api.text(g, who === 'girl' ? 'GIRL LOOK' : 'BOY LOOK', 80, 148, pal.night, { align: 'center' });
+    api.text(g, hal ? 'PIXEL CHIC  HALLOWEEN' : 'PIXEL CHIC', 80, 157, pal.maroon, { align: 'center' });
+
+    api.text(g, 'LOOKING GOOD!', 235, 24, pal.yellow, { scale: 2, align: 'center', shadow: pal.black });
+    button(g, 170, 50, 130, 18, 'DOWNLOAD PNG  D');
+    button(g, 170, 76, 130, 18, 'BACK TO STUDIO  B');
+    button(g, 170, 102, 130, 18, 'FINISH  ENTER');
+    if (msgT > 0) api.text(g, msg, 235, 130, pal.green, { align: 'center', shadow: pal.black });
+    api.text(g, 'FINISH SAVES YOUR CLEARED STATUS', 235, 150, pal.grey, { align: 'center' });
+  }
+
+  function draw(g) {
+    if (screen === 'select') drawSelect(g);
+    else if (screen === 'studio') drawStudio(g);
+    else if (screen === 'party') drawParty(g);
+    else drawPhoto(g);
+  }
+
+  function debug() {
+    return {
+      screen, who, theme, spooky: spooky(), prize: prizeKind(),
+      category: CATS[cat].name, equipped: SLOTS.filter((s) => cur()[s]).length, look: clone(cur()),
+    };
+  }
+
+  return { update, draw, debug };
+}

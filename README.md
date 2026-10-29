@@ -5,7 +5,7 @@ A retro pixel-art arcade you walk up to in the browser. Three cabinets, three mi
 | # | Machine | Type | Goal |
 |---|---------|------|------|
 | 1 | **GHOUL SHIFT** | First-person wave shooter (raycast pseudo-3D) | Survive 3 waves of ghouls |
-| 2 | **PEBBLE JUMP** | 2D platformer | Reach the flag |
+| 2 | **PIXEL CHIC** | Dress-up | Style a look (or a Halloween costume), party, and save your photo |
 | 3 | **EMBER TALE** | Top-down RPG | Help the lantern keeper and win one turn-based battle |
 
 Everything is original placeholder art drawn in code, one 16-color palette, and synthesized arcade sound effects. No downloads, no build step, no dependencies.
@@ -35,7 +35,7 @@ Then open **http://localhost:8080**. Stop the server with `Ctrl+C`.
 | Every machine | **Esc** (or click **ESC MENU** top-right) → Resume / Restart / Return to Arcade / Sound |
 | Anywhere | **M** toggles sound |
 | Ghoul Shift | **WASD** move · **mouse** aim (click to capture the mouse) · **Arrow keys / Q E** turn · **Click / Space** shoot |
-| Pebble Jump | **A D / Arrows** run · **W / Space / Up** jump · land on beetles to stomp them |
+| Pixel Chic | **Up/Down** pick · **Left/Right** change · **C** color · **X** swap girl/boy · **H** theme · **Enter** party → photo → finish · **B** back · **D** download PNG · or click |
 | Ember Tale | **WASD / Arrows** walk · **Space / Enter / E** talk & confirm · battle menu: Up/Down + Enter or click |
 
 The arcade remembers each machine's **CLEARED** status and **BEST** score for the current browser session (refreshing the page resets it).
@@ -52,7 +52,7 @@ src/core/             shared engine: manager (switching/overlays/progress), inpu
 src/hub/              arcade room scene + cabinet art
 src/games/_template/  minimal machine that exercises the whole contract
 src/games/shooter/    GHOUL SHIFT   (logic / raycaster / sprites / map data)
-src/games/platformer/ PEBBLE JUMP   (logic / physics / sprites / level data)
+src/games/platformer/ PIXEL CHIC    (logic / sprites / wardrobe items)
 src/games/rpg/        EMBER TALE    (logic / battle / sprites / map + dialogue data)
 tests/                bots, headless runner (npm test), in-browser integration suite
 ```
@@ -65,7 +65,7 @@ See **TEAM.md** for the game contract (lifecycle, input, audio, scoring) and own
 npm test
 ```
 
-Plays all three machines headlessly with scripted bots (`tests/bots.js`): each must be winnable, losable, and must not end on its own while idle; `finish` must fire exactly once.
+Plays all three machines headlessly with scripted bots (`tests/bots.js`): each must be winnable, must not end on its own while idle, and Ghoul Shift and Ember Tale must also be losable; `finish` must fire exactly once.
 
 In-browser integration suite (game open at http://localhost:8080, window visible, hands off the game for ~2 minutes):
 

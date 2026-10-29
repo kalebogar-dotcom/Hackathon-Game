@@ -2,7 +2,7 @@
 //   (await import('/tests/browser-integration.js')).run().then(console.table)
 // It drives the real page with synthetic key/mouse events and checks the arcade's debug() state.
 // Real (trusted) input during the run is counted so a run disturbed by a person can be spotted.
-import { shooterTurret, platformerRunner, rpgQuester } from './bots.js';
+import { shooterTurret, pixelChicStylist, rpgQuester } from './bots.js';
 
 export async function run() {
   const A = window.__arcade;
@@ -88,16 +88,16 @@ export async function run() {
     await toHubViaPause();
     hubClean('shooter');
 
-    // PEBBLE JUMP: mouse entry, real win, play again, ESC MENU tag, exit
+    // PIXEL CHIC: mouse entry, real win, play again, ESC MENU tag, exit
     await click(160, 88);
     check('platformer: entered by mouse click', D().machine === 'platformer');
-    await playUntilResult(platformerRunner());
+    await playUntilResult(pixelChicStylist({ halloween: true }));
     p = D();
-    check('platformer: bot reaches the flag', p.overlay === 'result' && p.progress.platformer.cleared, p.progress.platformer);
+    check('platformer: stylist finishes a look', p.overlay === 'result' && p.progress.platformer.cleared, p.progress.platformer);
     await sleep(300);
     await tap('Enter', 300);
     p = D();
-    check('platformer: play again is fresh', p.overlay === null && p.game?.coins === 0 && p.game?.lives === 3 && Math.round(p.game?.player.x) === 21, p.game);
+    check('platformer: play again is fresh', p.overlay === null && p.game?.screen === 'select' && p.game?.theme === 'normal' && !p.game?.spooky, p.game);
     await click(299, 6);
     check('platformer: ESC MENU tag pauses', D().overlay === 'pause');
     await sleep(300);

@@ -1,6 +1,6 @@
 // `npm test` — plays every minigame headlessly with scripted bots and checks win/lose/idle behavior.
 import { runGame } from './harness.mjs';
-import { shooterTurret, platformerRunner, rpgQuester, walkRight, idle } from './bots.js';
+import { shooterTurret, pixelChicStylist, pixelChicPartyHopper, rpgQuester, idle } from './bots.js';
 
 const results = [];
 const check = (name, ok, detail) => {
@@ -15,13 +15,17 @@ check('shooter: turret bot clears 3 waves', r.result?.won === true && once(r), {
 r = await runGame('shooter', idle(), { seconds: 120 });
 check('shooter: idle player loses', r.result?.won === false && once(r), { t: r.seconds });
 
-// PEBBLE JUMP
-r = await runGame('platformer', platformerRunner(), { seconds: 60 });
-check('platformer: runner reaches the flag', r.result?.won === true && once(r), { score: r.result?.score, lives: r.state.lives, t: r.seconds });
-r = await runGame('platformer', walkRight(), { seconds: 60 });
-check('platformer: walking into hazards loses after 3 lives', r.result?.won === false && once(r) && r.state.lives === 0, { t: r.seconds });
+// PIXEL CHIC
+r = await runGame('platformer', pixelChicStylist(), { seconds: 30, drawEvery: 1 });
+check('platformer: styled look finishes with a teddy bear', r.result?.won === true && once(r) && r.state.prize === 'bear' && !r.state.spooky
+  && r.result.score === 100 + r.state.equipped * 10, { score: r.result?.score, state: r.state.screen, t: r.seconds });
+r = await runGame('platformer', pixelChicStylist({ halloween: true }), { seconds: 30, drawEvery: 1 });
+check('platformer: costume stays spooky, wins a ghost and the bonus', r.result?.won === true && once(r) && r.state.theme === 'normal' && r.state.spooky
+  && r.state.prize === 'ghost' && r.result.score === 150 + r.state.equipped * 10, { score: r.result?.score, theme: r.state.theme, t: r.seconds });
+r = await runGame('platformer', pixelChicPartyHopper(), { seconds: 20, drawEvery: 1 });
+check('platformer: leaving the party returns to the studio without finishing', r.result === null && r.state.screen === 'studio');
 r = await runGame('platformer', idle(), { seconds: 20 });
-check('platformer: idle never ends the game', r.result === null);
+check('platformer: idle never ends the game', r.result === null && r.state.screen === 'select');
 
 // EMBER TALE
 r = await runGame('rpg', rpgQuester({ heal: true }), { seconds: 120 });
