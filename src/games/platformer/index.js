@@ -1,12 +1,13 @@
-// PIXEL CHIC (Machine #2): retro dress-up studio. Character select, studio, photo + PNG download.
-import { SKINS, EYE_COLORS, HAIR_COLORS, CLOTH_COLORS, HAIR, SLOT_ITEMS, PRESETS, DEFAULT_LOOKS } from './items.js';
-import { drawLook, exportPng } from './sprites.js';
+// PIXEL CHIC (Machine #2): dress-up studio, Halloween special, disco party, prizes, photo + PNG download.
+import { SKINS, EYE_COLORS, HAIR_COLORS, CLOTH_COLORS, HAIR, SLOT_ITEMS, PRESETS, COSTUMES, DEFAULT_LOOKS } from './items.js';
+import { drawLook, drawPrize, exportPng, PRIZE_H } from './sprites.js';
 
-const SLOTS = ['top', 'bottom', 'dress', 'outer', 'shoes', 'acc'];
+const SLOTS = ['top', 'bottom', 'dress', 'outer', 'shoes', 'hat', 'back', 'acc'];
 const POP_TIME = 0.18;
+const RH = 9, TOP = 12;
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const wrap = (i, n, d) => (i + d + n) % n;
-const itemOf = (slot, id) => SLOT_ITEMS[slot].find((i) => i.id === id);
+const itemOf = (slot, id) => (SLOT_ITEMS[slot] || []).find((i) => i.id === id);
 
 export function createGame(api) {
   const { palette: pal, input, audio } = api;
@@ -18,11 +19,21 @@ export function createGame(api) {
   let screen = 'select';
   let sel = 0;
   let cat = 0;
-  let lastPreset = -1;
+  let lastPreset = -1, lastCostume = -1;
+  let theme = 'normal';
   let t = 0, blinkIn = 2.5, blinking = 0, pop = 0;
   let msg = '', msgT = 0;
-  const sparks = [];
+  let partyT = 0, lastBeat = -1, prizePlayed = false;
+  const sparks = [], ghosts = [], bats = [], confetti = [];
   const cur = () => looks[who];
+
+  for (let i = 0; i < 4; i++) ghosts.push({ x: Math.random() * 300, y: 22 + Math.random() * 80, sp: 7 + Math.random() * 9, ph: Math.random() * 6, s: i % 2 ? 1 : 2 });
+  for (let i = 0; i < 3; i++) bats.push({ x: Math.random() * 300, y: 10 + Math.random() * 50, sp: 16 + Math.random() * 14, ph: Math.random() * 6 });
+
+  const hasHalloween = (look) => SLOTS.some((s) => look[s] && itemOf(s, look[s].id) && itemOf(s, look[s].id).collection === 'HALLOWEEN');
+  const spooky = () => theme === 'halloween' || hasHalloween(cur());
+  const prizeKind = () => (spooky() ? 'ghost' : 'bear');
+  const prizeColor = () => (cur().dress && cur().dress.c) || (cur().top && cur().top.c) || 'red';
 
   function spawn(n) {
     const cs = [pal.yellow, pal.cream, pal.sky];
@@ -32,6 +43,13 @@ export function createGame(api) {
   }
   function changed() { pop = POP_TIME; spawn(8); audio.play('coin'); }
   function note(s) { msg = s; msgT = 2; }
+
+  function applySet(l, items) {
+    for (const slot of SLOTS) {
+      const e = items[slot];
+      l[slot] = e ? { id: e[0], c: e[1] || itemOf(slot, e[0]).c1 } : null;
+    }
+  }
 
   const slotCat = (name, slot) => {
     const opts = [null, ...SLOT_ITEMS[slot]];
@@ -59,15 +77,27 @@ export function createGame(api) {
     { name: 'EYES', label: (l) => EYE_COLORS[l.eyes].name, swatch: (l) => EYE_COLORS[l.eyes].c,
       step: (l, d) => { l.eyes = wrap(l.eyes, EYE_COLORS.length, d); } },
     slotCat('TOP', 'top'), slotCat('BOTTOM', 'bottom'), slotCat('DRESS', 'dress'),
-    slotCat('JACKET', 'outer'), slotCat('SHOES', 'shoes'), slotCat('EXTRA', 'acc'),
+    slotCat('JACKET', 'outer'), slotCat('SHOES', 'shoes'), slotCat('HAT', 'hat'),
+    slotCat('BACK', 'back'), slotCat('EXTRA', 'acc'),
     { name: 'PRESETS',
       label: () => (lastPreset < 0 ? 'PICK ONE' : PRESETS[lastPreset].name),
       swatch: () => null,
       step: (l, d) => {
         lastPreset = lastPreset < 0 ? (d > 0 ? 0 : PRESETS.length - 1) : wrap(lastPreset, PRESETS.length, d);
-        const p = PRESETS[lastPreset];
-        for (const slot of SLOTS) { const e = p.items[slot]; l[slot] = e ? { id: e[0], c: e[1] } : null; }
+        applySet(l, PRESETS[lastPreset].items);
       } },
+    { name: 'COSTUME',
+      label: () => (lastCostume < 0 ? 'HALLOWEEN' : COSTUMES[lastCostume].name),
+      swatch: () => null,
+      step: (l, d) => {
+        lastCostume = lastCostume < 0 ? (d > 0 ? 0 : COSTUMES.length - 1) : wrap(lastCostume, COSTUMES.length, d);
+        applySet(l, COSTUMES[lastCostume].items);
+        theme = 'halloween';
+      } },
+    { name: 'THEME',
+      label: () => (theme === 'halloween' ? 'HALLOWEEN' : 'NORMAL'),
+      swatch: () => null,
+      step: () => { theme = theme === 'halloween' ? 'normal' : 'halloween'; } },
   ];
 
   function stepCat(d) { CATS[cat].step(cur(), d); changed(); }
@@ -79,12 +109,22 @@ export function createGame(api) {
     changed();
   }
   function swap() { who = who === 'girl' ? 'boy' : 'girl'; changed(); audio.play('select'); }
+  function toggleTheme() { theme = theme === 'halloween' ? 'normal' : 'halloween'; changed(); }
+  function startStudio() { who = sel ? 'boy' : 'girl'; screen = 'studio'; audio.play('select'); spawn(14); }
+
+  function goParty() {
+    screen = 'party'; partyT = 0; lastBeat = -1; prizePlayed = false;
+    confetti.length = 0;
+    const cs = [pal.yellow, pal.red, pal.sky, pal.green, pal.violet, pal.orange, pal.cream];
+    for (let i = 0; i < 60; i++) confetti.push({ x: Math.random() * 320, y: Math.random() * 180, vy: 25 + Math.random() * 35, c: cs[i % cs.length] });
+    audio.play('win');
+  }
   function goPhoto() { screen = 'photo'; audio.play('select'); spawn(24); }
   function backToStudio() { screen = 'studio'; audio.play('blip'); }
   function download() {
     try {
       const a = document.createElement('a');
-      a.href = exportPng(pal, cur(), 8);
+      a.href = exportPng(pal, cur(), prizeKind(), prizeColor(), 8);
       a.download = 'pixel-chic-' + who + '.png';
       document.body.appendChild(a);
       a.click();
@@ -95,24 +135,30 @@ export function createGame(api) {
   }
   function finishUp() {
     const n = SLOTS.filter((s) => cur()[s]).length;
-    api.finish({ won: true, score: 100 + n * 10 });
+    api.finish({ won: true, score: 100 + n * 10 + (spooky() ? 50 : 0) });
   }
-  function startStudio() { who = sel ? 'boy' : 'girl'; screen = 'studio'; audio.play('select'); spawn(14); }
 
   function studioClick() {
     const { x, y } = mouse;
     if (y >= 152 && y < 164) {
       if (x >= 148 && x < 188) return swap();
       if (x >= 192 && x < 232) return cycleColor();
-      if (x >= 264 && x < 312) return goPhoto();
+      if (x >= 264 && x < 312) return goParty();
     }
-    if (x >= 146 && y >= 15 && y < 15 + CATS.length * 12) {
-      const row = Math.floor((y - 15) / 12);
+    if (x >= 146 && y >= TOP && y < TOP + CATS.length * RH) {
+      const row = Math.floor((y - TOP) / RH);
       if (row !== cat) { cat = row; audio.play('blip'); }
       if (x >= 210 && x < 230) stepCat(-1);
       else if (x >= 286 && x < 306) stepCat(1);
     }
     return undefined;
+  }
+  function partyClick() {
+    const { x, y } = mouse;
+    if (y >= 163 && y < 176) {
+      if (x >= 8 && x < 108) goPhoto();
+      else if (x >= 212 && x < 312) backToStudio();
+    }
   }
   function photoClick() {
     const { x, y } = mouse;
@@ -133,6 +179,9 @@ export function createGame(api) {
       sparks[i].life -= dt; sparks[i].y -= dt * 12;
       if (sparks[i].life <= 0) sparks.splice(i, 1);
     }
+    const rangeW = screen === 'studio' ? 144 : 320;
+    for (const gh of ghosts) { gh.x += gh.sp * dt; if (gh.x > rangeW + 20) gh.x = -20; }
+    for (const b of bats) { b.x += b.sp * dt; if (b.x > rangeW + 20) b.x = -20; }
     if (t < 0.25) return; // ignore the keypress that entered the machine
     const click = mouse.pressed && !(mouse.x >= 276 && mouse.y < 12); // top-right belongs to ESC MENU
 
@@ -149,8 +198,18 @@ export function createGame(api) {
       if (input.wasPressed('ArrowRight', 'KeyD')) stepCat(1);
       if (input.wasPressed('KeyC')) cycleColor();
       if (input.wasPressed('KeyX')) swap();
+      if (input.wasPressed('KeyH')) toggleTheme();
       if (click) studioClick();
+      if (input.wasPressed('Enter')) goParty();
+    } else if (screen === 'party') {
+      partyT += dt;
+      const beat = Math.floor(partyT * 2);
+      if (beat !== lastBeat) { lastBeat = beat; audio.play('blip'); }
+      if (!prizePlayed && partyT > 2.2) { prizePlayed = true; audio.play('coin'); spawn(20); }
+      for (const f of confetti) { f.y += f.vy * dt; if (f.y > 182) { f.y = -2; f.x = Math.random() * 320; } }
+      if (click) partyClick();
       if (input.wasPressed('Enter')) goPhoto();
+      if (input.wasPressed('KeyB', 'Backspace')) backToStudio();
     } else {
       if (Math.random() < dt * 3) spawn(1);
       if (click) photoClick();
@@ -160,6 +219,7 @@ export function createGame(api) {
     }
   }
 
+  // ---------- drawing helpers ----------
   function arrow(g, x, y, dir, c) {
     g.fillStyle = c;
     if (dir < 0) { g.fillRect(x + 2, y, 1, 5); g.fillRect(x + 1, y + 1, 1, 3); g.fillRect(x, y + 2, 1, 1); }
@@ -176,33 +236,82 @@ export function createGame(api) {
       if (s.life > 0.25) { g.fillRect(x - 1, y, 1, 1); g.fillRect(x + 1, y, 1, 1); g.fillRect(x, y - 1, 1, 1); g.fillRect(x, y + 1, 1, 1); }
     }
   }
+  function ghostSprite(g, x, y, s) {
+    g.fillStyle = pal.cream;
+    g.fillRect(x + s, y, 5 * s, s);
+    g.fillRect(x, y + s, 7 * s, 5 * s);
+    g.fillRect(x, y + 6 * s, 2 * s, s); g.fillRect(x + 3 * s, y + 6 * s, s, s); g.fillRect(x + 5 * s, y + 6 * s, 2 * s, s);
+    g.fillStyle = pal.black;
+    g.fillRect(x + 2 * s, y + 2 * s, s, 2 * s); g.fillRect(x + 4 * s, y + 2 * s, s, 2 * s);
+    g.fillStyle = '#f28ab2';
+    g.fillRect(x + s, y + 4 * s, s, s); g.fillRect(x + 5 * s, y + 4 * s, s, s);
+  }
+  function batSprite(g, x, y, up) {
+    g.fillStyle = pal.violet;
+    g.fillRect(x + 3, y + 1, 2, 3);
+    if (up) { g.fillRect(x, y, 3, 1); g.fillRect(x + 5, y, 3, 1); g.fillRect(x + 1, y + 1, 2, 1); g.fillRect(x + 5, y + 1, 2, 1); }
+    else { g.fillRect(x, y + 3, 3, 1); g.fillRect(x + 5, y + 3, 3, 1); g.fillRect(x + 1, y + 2, 2, 1); g.fillRect(x + 5, y + 2, 2, 1); }
+    g.fillStyle = pal.red;
+    g.fillRect(x + 3, y + 1, 1, 1); g.fillRect(x + 4, y + 1, 1, 1);
+  }
+  function pumpkinSprite(g, x, y) {
+    g.fillStyle = pal.green; g.fillRect(x + 4, y, 2, 3);
+    g.fillStyle = pal.orange; g.fillRect(x, y + 2, 10, 7);
+    g.fillStyle = pal.red; g.fillRect(x + 2, y + 2, 1, 7); g.fillRect(x + 7, y + 2, 1, 7);
+    g.fillStyle = pal.yellow;
+    g.fillRect(x + 2, y + 4, 2, 2); g.fillRect(x + 6, y + 4, 2, 2); g.fillRect(x + 3, y + 7, 4, 1);
+  }
+  function drawSpooks(g, bats3) {
+    g.globalAlpha = 0.9;
+    for (const gh of ghosts) ghostSprite(g, Math.round(gh.x), Math.round(gh.y + Math.sin(t * 2 + gh.ph) * 4), gh.s);
+    g.globalAlpha = 1;
+    if (bats3) for (const b of bats) batSprite(g, Math.round(b.x), Math.round(b.y + Math.sin(t * 3 + b.ph) * 5), Math.sin(t * 14 + b.ph) > 0);
+  }
 
+  // ---------- screens ----------
   function drawSelect(g) {
     g.fillStyle = pal.indigo; g.fillRect(0, 0, 320, 180);
     g.fillStyle = pal.violet; g.fillRect(0, 140, 320, 40);
-    api.text(g, 'PIXEL CHIC', 160, 8, pal.yellow, { scale: 2, align: 'center', shadow: pal.black });
-    api.text(g, 'PICK YOUR STYLE', 160, 24, pal.cream, { align: 'center' });
+    api.text(g, 'PIXEL CHIC', 160, 6, pal.yellow, { scale: 2, align: 'center', shadow: pal.black });
+    api.text(g, 'PICK YOUR STYLE', 160, 20, pal.cream, { align: 'center' });
     [['girl', 80, 'GIRL'], ['boy', 240, 'BOY']].forEach(([key, cx, label], i) => {
       const bob = Math.sin(t * 3 + i) > 0.3 ? 1 : 0;
-      drawLook(g, pal, looks[key], cx - 39, 34 + bob, 3, blinking > 0);
+      drawLook(g, pal, looks[key], cx - 39, 28 + bob, 3, blinking > 0);
       if (sel === i) {
         g.fillStyle = pal.yellow;
-        g.fillRect(cx - 44, 32, 88, 1); g.fillRect(cx - 44, 140, 88, 1);
-        g.fillRect(cx - 44, 32, 1, 109); g.fillRect(cx + 43, 32, 1, 109);
+        g.fillRect(cx - 44, 26, 88, 1); g.fillRect(cx - 44, 142, 88, 1);
+        g.fillRect(cx - 44, 26, 1, 117); g.fillRect(cx + 43, 26, 1, 117);
       }
       api.text(g, label, cx, 148, sel === i ? pal.yellow : pal.cream, { scale: 2, align: 'center', shadow: pal.black });
     });
     api.text(g, 'LEFT RIGHT CHOOSE  ENTER OR CLICK START', 160, 169, pal.cream, { align: 'center' });
   }
 
-  function drawStudio(g) {
-    g.fillStyle = pal.indigo; g.fillRect(0, 0, 144, 180);
+  function drawStudioBg(g) {
+    const hal = theme === 'halloween';
+    g.fillStyle = hal ? pal.black : pal.indigo; g.fillRect(0, 0, 144, 180);
     g.fillStyle = pal.night; for (let x = 8; x < 144; x += 16) g.fillRect(x, 0, 2, 150);
-    g.fillStyle = pal.violet; g.fillRect(0, 150, 144, 30);
+    if (hal) {
+      g.fillStyle = pal.cream; g.fillRect(108, 12, 12, 12); g.fillRect(106, 14, 16, 8);
+      g.fillStyle = pal.grey; g.fillRect(111, 15, 2, 2); g.fillRect(114, 19, 3, 2);
+      for (let i = 0; i < 8; i++) {
+        if (Math.sin(t * 3 + i * 2) > 0) { g.fillStyle = pal.yellow; g.fillRect(6 + i * 17, 6 + ((i * 29) % 40), 1, 1); }
+      }
+      g.fillStyle = pal.maroon; g.fillRect(0, 150, 144, 30);
+      g.fillStyle = pal.orange; g.fillRect(0, 150, 144, 1);
+      drawSpooks(g, true);
+      pumpkinSprite(g, 3, 142); pumpkinSprite(g, 131, 142);
+    } else {
+      g.fillStyle = pal.violet; g.fillRect(0, 150, 144, 30);
+    }
     g.fillStyle = pal.night; g.fillRect(26, 149, 92, 3);
+  }
+
+  function drawStudio(g) {
+    drawStudioBg(g);
     const hop = pop > 0 ? Math.round(Math.sin((1 - pop / POP_TIME) * Math.PI) * 5) : 0;
     const bob = Math.sin(t * 3) > 0.3 ? 1 : 0;
-    drawLook(g, pal, cur(), 20, 22 + bob - hop, 4, blinking > 0);
+    drawLook(g, pal, cur(), 20, 6 + bob - hop, 4, blinking > 0);
     drawSparks(g);
     api.text(g, 'PIXEL CHIC', 6, 6, pal.yellow, { shadow: pal.black });
     api.text(g, who.toUpperCase() + ' STYLE', 72, 160, pal.cream, { align: 'center' });
@@ -211,9 +320,9 @@ export function createGame(api) {
     g.fillStyle = pal.blue; g.fillRect(144, 0, 1, 180);
     const look = cur();
     CATS.forEach((c, i) => {
-      const y = 16 + i * 12;
+      const y = TOP + 2 + i * RH;
       const on = i === cat;
-      if (on) { g.fillStyle = pal.indigo; g.fillRect(146, y - 1, 172, 11); }
+      if (on) { g.fillStyle = pal.indigo; g.fillRect(146, TOP + i * RH, 172, RH); }
       api.text(g, c.name, 150, y, on ? pal.yellow : pal.grey);
       api.text(g, c.label(look), 258, y, on ? pal.cream : pal.grey, { align: 'center' });
       if (on) { arrow(g, 216, y, -1, pal.yellow); arrow(g, 292, y, 1, pal.yellow); }
@@ -223,38 +332,4 @@ export function createGame(api) {
     button(g, 148, 152, 40, 12, 'SWAP X');
     button(g, 192, 152, 40, 12, 'COLOR C');
     button(g, 264, 152, 48, 12, 'DONE');
-    api.text(g, 'UP DOWN PICK  LEFT RIGHT CHANGE', 232, 168, pal.grey, { align: 'center' });
-    api.text(g, 'C COLOR  X SWAP  ENTER DONE', 232, 174, pal.grey, { align: 'center' });
-  }
-
-  function drawPhoto(g) {
-    g.fillStyle = pal.indigo; g.fillRect(0, 0, 320, 180);
-    g.fillStyle = pal.night; for (let x = 8; x < 320; x += 16) g.fillRect(x, 0, 2, 180);
-    g.fillStyle = pal.black; g.fillRect(24, 18, 120, 152);           // shadow
-    g.fillStyle = pal.cream; g.fillRect(20, 14, 120, 152);           // frame
-    g.fillStyle = pal.violet; g.fillRect(26, 20, 108, 118);          // photo
-    drawLook(g, pal, cur(), 41, 28, 3, blinking > 0);
-    drawSparks(g);
-    api.text(g, who === 'girl' ? 'GIRL LOOK' : 'BOY LOOK', 80, 148, pal.night, { align: 'center' });
-    api.text(g, 'PIXEL CHIC', 80, 157, pal.maroon, { align: 'center' });
-
-    api.text(g, 'LOOKING GOOD!', 235, 24, pal.yellow, { scale: 2, align: 'center', shadow: pal.black });
-    button(g, 170, 50, 130, 18, 'DOWNLOAD PNG  D');
-    button(g, 170, 76, 130, 18, 'BACK TO STUDIO  B');
-    button(g, 170, 102, 130, 18, 'FINISH  ENTER');
-    if (msgT > 0) api.text(g, msg, 235, 130, pal.green, { align: 'center', shadow: pal.black });
-    api.text(g, 'FINISH SAVES YOUR CLEARED STATUS', 235, 150, pal.grey, { align: 'center' });
-  }
-
-  function draw(g) {
-    if (screen === 'select') drawSelect(g);
-    else if (screen === 'studio') drawStudio(g);
-    else drawPhoto(g);
-  }
-
-  function debug() {
-    return { screen, who, category: CATS[cat].name, equipped: SLOTS.filter((s) => cur()[s]).length, look: clone(cur()) };
-  }
-
-  return { update, draw, debug };
-}
+    api.text(g, 'UP DOWN PICK  LEFT RIGHT
