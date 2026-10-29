@@ -1,6 +1,6 @@
 // `npm test` — plays every minigame headlessly with scripted bots and checks win/lose/idle behavior.
 import { runGame } from './harness.mjs';
-import { shooterTurret, platformerRunner, rpgQuester, walkRight, idle } from './bots.js';
+import { bearHunter, pixelChicStylist, rpgQuester, startThenIdle, idle } from './bots.js';
 
 const results = [];
 const check = (name, ok, detail) => {
@@ -8,25 +8,33 @@ const check = (name, ok, detail) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  ${JSON.stringify(detail)}` : ''}`);
 };
 const once = r => r.finishCalls === 1;
+const realRandom = Math.random;
+const seeded = s => () => ((s = (s * 16807) % 2147483647) / 2147483647);
 
-// GHOUL SHIFT
-let r = await runGame('shooter', shooterTurret(), { seconds: 120, drawEvery: 1 });
-check('shooter: turret bot clears 3 waves', r.result?.won === true && once(r), { score: r.result?.score, t: r.seconds });
-r = await runGame('shooter', idle(), { seconds: 120 });
-check('shooter: idle player loses', r.result?.won === false && once(r), { t: r.seconds });
+// BEAR IN THE RED WOODS — the key-only bot wins about 2 runs in 3, so three fixed seeds keep this deterministic.
+const bearRuns = [];
+for (const s of [11, 22, 33]) {
+  Math.random = seeded(s);
+  const run = await runGame('shooter', bearHunter(), { seconds: 400, drawEvery: s === 11 ? 1 : 30 });
+  bearRuns.push({ seed: s, won: run.result?.won ?? null, score: run.result?.score, once: once(run), wave: run.state.wave, bought: run.state.purchases.join('+'), t: run.seconds });
+}
+Math.random = realRandom;
+check('shooter: key-only bot buys both wall guns and reaches wave 3', bearRuns.every(b => b.bought === 'shotgun+smg' && b.wave === 3 && b.once), bearRuns);
+check('shooter: key-only bot kills the bear and wins', bearRuns.some(b => b.won === true), bearRuns.map(b => `${b.seed}:${b.won ? 'W' : 'L'}${b.score}`));
+let r = await runGame('shooter', startThenIdle(), { seconds: 240 });
+check('shooter: idle player loses', r.result?.won === false && once(r), { score: r.result?.score, t: r.seconds });
+r = await runGame('shooter', idle(), { seconds: 2 });
+check('shooter: waits on its title screen', r.result === null && r.state.mode === 'title');
 
-// PEBBLE JUMP
-r = await runGame('platformer', platformerRunner(), { seconds: 60 });
-check('platformer: runner reaches the flag', r.result?.won === true && once(r), { score: r.result?.score, lives: r.state.lives, t: r.seconds });
-r = await runGame('platformer', walkRight(), { seconds: 60 });
-check('platformer: walking into hazards loses after 3 lives', r.result?.won === false && once(r) && r.state.lives === 0, { t: r.seconds });
+// PIXEL CHIC
+r = await runGame('platformer', pixelChicStylist(), { seconds: 10 });
+check('platformer: stylist finishes a look (PIXEL CHIC)', r.result?.won === true && once(r), { score: r.result?.score, t: r.seconds });
 r = await runGame('platformer', idle(), { seconds: 20 });
 check('platformer: idle never ends the game', r.result === null);
 
 // EMBER TALE
 r = await runGame('rpg', rpgQuester({ heal: true }), { seconds: 120 });
 check('rpg: full quest completes', r.result?.won === true && once(r) && r.state.quest === 'done', { score: r.result?.score, t: r.seconds });
-const realRandom = Math.random;
 let n = 0;
 Math.random = () => (n++ % 2 ? 0.99 : 0); // Ember rolls minimum damage, the slime rolls maximum
 r = await runGame('rpg', rpgQuester({ heal: false }), { seconds: 120 });

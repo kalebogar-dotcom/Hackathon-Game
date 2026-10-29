@@ -4,14 +4,18 @@
 
 A feasibility prototype (~2 hours): a retro arcade hub with three selectable cabinets, each launching a
 small original minigame inside the same browser app. Retro style: 320×180 pixels scaled up crisp,
-one 16-color palette (`src/core/palette.js`), 3×5 pixel font, synthesized arcade SFX.
+one shared 16-color palette (`src/core/palette.js`), 3×5 pixel font, synthesized arcade SFX.
+Exception: Bear in the Red Woods was built as a standalone game first and keeps its own 16-color
+crimson-forest palette (`src/games/shooter/config.js`); its cabinet in the hub uses the shared palette.
 **Priority: hub + all three machines playable and switchable cleanly. Polish only after that.**
 
-| Machine | Minimum playable scope | Win | Lose | Score (integer, higher is better) |
+| Machine | Scope | Win | Lose | Score (integer, higher is better) |
 |---|---|---|---|---|
-| GHOUL SHIFT (shooter) | One arena, WASD + mouse aim, one weapon, one enemy type, health, 3 waves (3/5/8) | Clear wave 3 | Health 0 | `kills × 100 + health remaining` (on loss: `kills × 100`) |
-| PEBBLE JUMP (platformer) | One short level, run/jump, platforms, coins, spikes, beetles, flag | Touch the flag | 3 lives lost (spikes / beetles / falling) | `coins × 10 + stomps × 25 + lives × 50` (on loss: `coins × 10 + stomps × 25`) |
+| BEAR IN THE RED WOODS (shooter) | Forest clearing + enterable log cabin, title screen, pistol + 2 wall-buy guns (Split-Barrel shotgun 400, Sawmill SMG 750), points, 3 waves (6/10/8 zombies) with 12 s breaks, two repairable window barricades, bear boss in wave 3 with a warning, health bar and telegraphed charge | Kill the bear and every zombie in wave 3 | Health 0 | Points earned: `+10` per hit, `+60` per zombie, `+500` for the bear (spending does not lower the score) |
+| PIXEL CHIC (platformer slot) | Dress-up: pick a model, change clothes and colors, take the photo | Finish the photo | — (cannot lose) | `100 + items equipped × 10` |
 | EMBER TALE (rpg) | One room, one NPC, short talk, one turn-based battle (Attack / Heal), report back | Report back after winning the battle | HP 0 in battle | `100 + HP remaining × 10` (on loss: `0`) |
+
+GHOUL SHIFT (the original shooter) and PEBBLE JUMP (the original platformer) were replaced; both remain in Git history.
 
 Pre-approved cuts if time runs short (in order): shooter keyboard-only turning → platformer spikes only
 (already) → RPG Attack only → plain hub hit areas → one shared SFX for most events.
@@ -41,6 +45,24 @@ Each game folder keeps these apart:
 - helpers such as `raycaster.js`, `physics.js`, `battle.js`
 
 Games import only from their own folder. Shared things come in through `api` — do not import `src/core` directly.
+
+Bear in the Red Woods (`src/games/shooter/`) uses its own module names:
+
+| File | Role |
+|---|---|
+| `index.js` | `createGame(api)`: title screen, player, weapons, wall buys, zombies, bear, wave director, `debug()` |
+| `world.js` | Map data (24×19 tiles, legend in the file), collision, hitscan rays, breadth-first pathfinding for enemies |
+| `render.js` | Raycaster, billboard sprites, held gun, HUD, title and end card (text via `api.text`) |
+| `sprites.js` | All pixel art, built with `api.sprite` at 4 fog levels; cached across runs because it never changes |
+| `config.js` | The game's palette and every tuning number (weapons, zombies, bear, waves, `INTERMISSION` break length, `BARRICADE` boards/speeds/rewards/caps, `BEAR_WARNING` timing) — balance changes go here only |
+
+Barricades and collision: windows are `B` tiles in `world.js`. Rays (`isWallTile`) ignore boards so shots and
+the raycaster see through; movement (`isWall`) also asks the running game whether a window still has boards
+(`setBoardedCheck`, re-registered every frame and cleared in `destroy()`).
+
+Arcade adaptation: the game has no pause screen, mute or restart of its own (the arcade owns Esc, M and
+Play Again). When a run ends it shows its win/lose card for 1.6 s, then calls `api.finish({ won, score })`.
+Each entry or Play Again creates a fresh instance that starts on the game's title screen.
 
 ## The game contract
 
@@ -123,6 +145,8 @@ Held keys and mouse state are **cleared** on enter, pause, resume, finish, resta
 
 `select blip talk pause shoot hit hurt explode jump coin heal wave win lose`
 
+Bear in the Red Woods adds: `pistol shotgun smg bearHit zdie groan buy equip deny clear roar charge thud bearDie board boardBreak bearStep bearCall`
+
 The arcade plays `select` on enter, `pause` on pause, and `win`/`lose` on finish — games don't need to.
 All sounds are stopped automatically on pause, finish, restart and exit. Unknown names log a warning.
 New sounds are added by the lead in `src/core/audio.js`.
@@ -180,3 +204,52 @@ and is what the automated playtests read. It must not change state.
 - **Not verified automatically:** mouse capture (pointer lock) in GHOUL SHIFT — browsers only allow it from a
   real click, so it needs a human check: click to aim, press Esc (should pause and free the mouse), Resume.
   Audio was exercised (correct sounds requested and stopped) but not listened to.
+- **BEAR IN THE RED WOODS replaces GHOUL SHIFT** (branch `bear-arcade-integration`, based on `main` after the
+  PIXEL CHIC changes). The standalone game's real modules moved into `src/games/shooter/` and were adapted to the
+  contract (api input/audio/text/sprite, arcade-owned pause/mute/Play Again, `api.finish` after a 1.6 s end
+  card, `debug()` snapshot). Its sound effects joined `src/core/audio.js`. Cabinet redesigned: log-cabin body,
+  dark pines, red accents, bear-and-red-moon kick panel, two-line marquee, animated redwood screen.
+  - Tests updated for the new lineup: the stale PEBBLE JUMP bots (the suite crashed on `main` after PIXEL CHIC
+    replaced it) became PIXEL CHIC checks, and the headless harness got a small `document` stub because PIXEL
+    CHIC builds canvases directly instead of through `api.sprite`.
+  - `npm test`: headless suite **10 / 10**, Bear unit checks **32 / 32**. The key-only Bear bot wins about 2 runs
+    in 3 (8 of 12 in a sample); losses happen in wave 3, so wave 3 is the hardest part of the game.
+  - **Browser suite 25 / 25** (pane visible, no user input): Bear entered by key, title → run, pause/resume,
+    real loss recorded once, Play Again fresh, real key-driven win (first attempt, both guns bought, bear
+    killed), return from pause and result screens, re-entry fresh; PIXEL CHIC by mouse, finish, Play Again,
+    ESC MENU tag; EMBER TALE quest; 9 rapid switches leave 0 listeners / 0 live sounds; ~60 updates/s.
+  - Still needs a human: mouse capture in Bear (click to aim, Esc frees the mouse and pauses, Resume
+    re-captures) and listening to the new sounds.
+- **Bear: barricades, wave breaks, bear warning** (branch `bear-barricades-breaks-warning`, not pushed):
+  - `npm test`: headless **10 / 10**; Bear unit checks all pass, including new checks for barricade
+    tearing and entry, repairs, reward cap and reset, gun priority, the fresh-press rule, blocked windows,
+    the bear smashing a window, two zombies at one window, breaks (length, no spawns, single advance,
+    ticks, buying/repairing), the warning (timing, order, once only) and restart resets.
+  - Two navigation bugs found by the tests and fixed: zombies could pin each other against the jambs of a
+    one-tile window, and the close-range straight chase could scrape a wall corner and stall.
+  - Browser (real page): boards render across the windows; zombies tear in and E repairs (+10, hammer sound);
+    break countdown shows and freezes under the arcade's pause; the warning shows, freezes under pause, is
+    silent while muted (M key) and leaves no sounds after Restart or Return to Arcade; re-entry is clean.
+    Browser suite: 22 / 25 in one run (the 3 misses were one ordinary bot loss plus a real click and window
+    blur that paused the game); the Bear win section was rerun on its own with no user input and won on
+    attempt 2; return to hub and all-three progress then passed. The page was often throttled by the OS
+    (window not in front), so parts were driven by stepping frames manually or with a timer-driven loop.
+  - Still needs a human: listening to the new sounds (footsteps, roar, hammer, board crack).
+- **Bear: "Protect the Creek" learning mission** (branch `bear-creek-mission`, based on
+  `bear-barricades-breaks-warning`; not pushed):
+  - Creek floor-cast east of the cabin (walkable; navigation unchanged), 3 litter billboards, mission in the
+    break after wave 1 that holds the countdown; E priority gun > litter > window repair; cleanup bonus 100 and
+    lesson bonus 50 are spendable points tracked in `mission.bonus`, never in the combat score. Text in
+    `mission-text.js`, tuning in `config.js` `MISSION`. Facts checked against EPA Trash Free Waters (README).
+  - `npm test`: headless 10 / 10 and all Bear checks, including mission checks (litter placement out of gun and
+    window E range, no pickup before the mission, countdown held with no spawns, one-time bonuses kept out of
+    the combat score, no buy/repair while collecting, answers A/C retry with nothing lost, B rewarded once,
+    no moving or shooting while answering, Enter finishes, N skips from cleanup and from the question,
+    next wave starts once, mission once per run, restart reset). Existing combat tests and the key-only bot
+    skip the mission with N.
+  - Browser (real page, keys only): bot cleared wave 1, then the mission was played by steering with the arrow
+    keys and W to each item and pressing E; pause froze mission and countdown; A by key, C by mouse click,
+    B by key 2; Enter resumed the countdown and wave 2 started once; Restart and Return to Arcade mid-mission
+    left no sounds and a fresh mission; N skip worked in the page. Browser suite **25 / 25** with no user input
+    (frames were driven by a 16 ms timer because the OS throttled the window). One layout bug found and fixed:
+    the CLICK TO AIM hint overlapped the mission panel.

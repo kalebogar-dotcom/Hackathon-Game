@@ -1,322 +1,785 @@
-// GHOUL SHIFT — first-person wave shooter (raycast pseudo-3D). Survive three waves of ghouls.
-import { ARENA, WAVES } from './map.js';
-import { buildSprites } from './sprites.js';
-import { isSolid, findTiles, makeCamera, project, drawWalls, drawBillboard } from './raycaster.js';
+// BEAR IN THE RED WOODS — first-person zombie survival with a bear boss (the arcade's shooter machine).
+// Gameplay: title screen, player, weapons, wall buys, zombies, the bear and the wave director.
+// Everything shared comes in through the arcade `api`; pause, mute and Play Again belong to the arcade.
+import {
+  PLAYER, WEAPONS, WEAPON_ORDER, BUY_RANGE, SCORE, ZOMBIE, BEAR, WAVES, MAX_ALIVE, INTERMISSION, BARRICADE, BEAR_WARNING, MISSION,
+} from './config.js';
+import { findTiles, WALL_BUYS, WINDOWS, LITTER, moveCircle, castRay, trunkHit, segmentClear, createNav, setBoardedCheck } from './world.js';
+import { useText, drawFrame, drawTitle, drawEnd, quizOptionRects } from './render.js';
+import { buildArt } from './sprites.js';
 
-const FOV_SCALE = 0.66;
-const MOVE_SPEED = 2.6;      // tiles per second
-const TURN_SPEED = 2.4;      // radians per second (keyboard)
-const MOUSE_SENS = 0.0028;   // radians per mouse pixel
-const PLAYER_RADIUS = 0.22;
-const MAX_HEALTH = 100;
-const FIRE_COOLDOWN = 0.28;
-const GHOUL = { hp: 2, radius: 0.3, reach: 0.75, damage: 6, attackEvery: 1.0, baseSpeed: 0.95, speedPerWave: 0.2 };
-const WAVE_HEAL = 20;
+const START = findTiles('P')[0];
+const SPAWNS = findTiles('S');
+const END_CARD = 1.6; // seconds the win/lose card shows before the arcade's result menu
+
+// Pixel art is immutable, so it is built once per sprite factory and shared by every run.
+let artCache = null;
+function getArt(sprite) {
+  if (artCache?.sprite !== sprite) artCache = { sprite, art: buildArt(sprite) };
+  return artCache.art;
+}
+
+// ---------- pure helpers (exported for tests) ----------
+
+export function damageFactor(w, dist) {
+  const [near, far] = w.falloff;
+  if (dist <= near) return 1;
+  if (dist >= far) return w.minFactor;
+  return 1 - ((1 - w.minFactor) * (dist - near)) / (far - near);
+}
+
+/** Trace one trigger pull: each pellet hits the nearest enemy in front of the first wall or trunk. */
+export function traceShot(world, weapon, rand = Math.random) {
+  const p = world.player;
+  const hits = [], impacts = [];
+  for (let i = 0; i < weapon.pellets; i++) {
+    const a = p.angle + (rand() * 2 - 1) * weapon.spread;
+    const dx = Math.cos(a), dy = Math.sin(a);
+    const wall = Math.min(castRay(p.x, p.y, dx, dy), trunkHit(p.x, p.y, dx, dy));
+    let best = null, bestT = wall;
+    for (const e of world.enemies) {
+      if (e.dead) continue;
+      const ox = e.x - p.x, oy = e.y - p.y, t = ox * dx + oy * dy;
+      if (t <= 0 || t >= bestT) continue;
+      if (Math.abs(ox * dy - oy * dx) <= e.hitRadius) { best = e; bestT = t; }
+    }
+    if (best) hits.push({ enemy: best, damage: weapon.damage * damageFactor(weapon, bestT), x: p.x + dx * bestT, y: p.y + dy * bestT });
+    else impacts.push({ x: p.x + dx * (wall - 0.05), y: p.y + dy * (wall - 0.05) });
+  }
+  return { hits, impacts };
+}
+
+export function findBuyNear(player) {
+  return WALL_BUYS.find(b => Math.hypot(player.x - b.fx, player.y - b.fy) <= BUY_RANGE) ?? null;
+}
+
+/** The nearest window within repair range of the player, or null. */
+export function findRepairNear(world) {
+  const p = world.player;
+  let best = null, bestD = BARRICADE.repairRange;
+  for (const b of world.barricades) {
+    const d = Math.hypot(p.x - b.cx, p.y - b.cy);
+    if (d <= bestD) { best = b; bestD = d; }
+  }
+  return best;
+}
+
+// ---------- the creek mission ----------
+
+// waiting -> pending (wave-cleared banner) -> cleanup -> explain -> quiz -> answered -> done; N skips from any active state.
+const MISSION_ACTIVE = new Set(['pending', 'cleanup', 'explain', 'quiz', 'answered']);
+export const QUIZ_ANSWERS = Object.freeze({ A: false, B: true, C: false }); // B: covered bin away from the creek
+
+export function newMission() {
+  return { state: 'waiting', time: 0, collected: [], cleanupRewarded: false, answers: [], feedback: null, correct: false, lessonRewarded: false, bonus: 0 };
+}
+export const missionActive = world => MISSION_ACTIVE.has(world.mission.state);
+const missionModal = world => world.mission.state === 'quiz' || world.mission.state === 'answered';
+
+/** The nearest uncollected piece of litter in pickup range, only while the cleanup is on. */
+export function findLitterNear(world) {
+  if (world.mission.state !== 'cleanup') return null;
+  const p = world.player;
+  let best = null, bestD = MISSION.pickupRange;
+  for (const l of LITTER) {
+    if (world.mission.collected.includes(l.id)) continue;
+    const d = Math.hypot(p.x - l.x, p.y - l.y);
+    if (d <= bestD) { best = l; bestD = d; }
+  }
+  return best;
+}
+
+/** True when a new board would trap someone standing in an empty window opening. */
+export function windowBlocked(world, b) {
+  if (b.boards > 0) return false; // nobody can stand inside a boarded opening
+  const inside = e => Math.abs(e.x - b.cx) < 0.5 + e.radius && Math.abs(e.y - b.cy) < 0.5 + e.radius;
+  return inside(world.player) || world.enemies.some(e => !e.dead && inside(e));
+}
+
+/** Buy (or re-equip) a wall gun. Points are deducted only when the purchase succeeds. */
+export function tryBuy(world, buy) {
+  const p = world.player, w = WEAPONS[buy.weapon];
+  if (p.owned.has(w.id)) {
+    const changed = p.weapon !== w.id;
+    if (changed) equip(p, w.id);
+    return { ok: true, reason: changed ? 'equipped' : 'owned' };
+  }
+  if (world.points < w.price) return { ok: false, reason: 'points' };
+  world.points -= w.price;
+  p.owned.add(w.id);
+  equip(p, w.id);
+  return { ok: true, reason: 'bought' };
+}
+
+function equip(p, id) {
+  p.weapon = id;
+  p.cooldown = 0.25;
+  p.raise = 1;
+}
+
+export function makeZombie(x, y, wave) {
+  return {
+    kind: 'zombie', x, y, radius: ZOMBIE.radius, hitRadius: ZOMBIE.hitRadius,
+    hp: ZOMBIE.hp[wave], maxHp: ZOMBIE.hp[wave], speed: ZOMBIE.speed[wave] * (0.9 + Math.random() * 0.2),
+    attackTimer: ZOMBIE.windup, tearTimer: BARRICADE.breakEvery, swipe: 0, flash: 0, anim: Math.random() * 4, groan: 2 + Math.random() * 5, dead: false,
+  };
+}
+
+export function makeBear(x, y) {
+  return {
+    kind: 'bear', x, y, radius: BEAR.radius, hitRadius: BEAR.hitRadius, hp: BEAR.hp, maxHp: BEAR.hp,
+    state: 'walk', timer: 0, cooldown: BEAR.firstCharge, swipeTimer: BEAR.swipeWindup, swipe: 0,
+    dirX: 0, dirY: 0, hitPlayer: false, flash: 0, anim: 0, charges: 0, dead: false,
+  };
+}
+
+// ---------- barricades ----------
+
+/** The first boarded window on the straight line from (ax, ay) to (bx, by), or null. */
+function boardedAlong(world, ax, ay, bx, by) {
+  const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 0.1));
+  for (let i = 1; i <= n; i++) {
+    const b = world.boardedAt(Math.floor(ax + ((bx - ax) * i) / n), Math.floor(ay + ((by - ay) * i) / n));
+    if (b) return b;
+  }
+  return null;
+}
+
+/** Where an enemy on the (x, y) side of a window stands to tear at it. */
+function approachPoint(b, x, y) {
+  return b.axis === 'x'
+    ? { x: b.cx, y: b.cy + (y < b.cy ? -0.8 : 0.8) }
+    : { x: b.cx + (x < b.cx ? -0.8 : 0.8), y: b.cy };
+}
+
+function tearBoards(world, b, count) {
+  const torn = Math.min(count, b.boards);
+  if (!torn) return;
+  b.boards -= torn;
+  world.boardsTorn += torn;
+  world.audio.play('boardBreak');
+  world.burst(b.cx, b.cy, 0.5, ['#a8754a', '#6e4128'], 5 * torn, 1.2);
+}
+
+// ---------- enemies ----------
+
+/** Clear for the whole body, not just its center: both edges of the swept path miss walls and trunks. */
+function wideClear(e, p) {
+  const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy) || 1;
+  const ox = (-dy / d) * e.radius, oy = (dx / d) * e.radius;
+  return segmentClear(e.x + ox, e.y + oy, p.x + ox, p.y + oy) && segmentClear(e.x - ox, e.y - oy, p.x - ox, p.y - oy);
+}
+
+function chaseTarget(e, world) {
+  const p = world.player;
+  // Close by, walk straight at the player only if the body fits; otherwise follow the path grid (no corner scraping).
+  if (Math.hypot(p.x - e.x, p.y - e.y) < 2.2 && wideClear(e, p)) return p;
+  return world.nav.waypoint(e.x, e.y) ?? p;
+}
+
+function steer(e, tx, ty, step) {
+  const dx = tx - e.x, dy = ty - e.y, d = Math.hypot(dx, dy);
+  if (d < 1e-4) return;
+  const s = Math.min(d, step);
+  moveCircle(e, (dx / d) * s, (dy / d) * s, e.radius);
+}
+
+function updateZombie(z, world, dt) {
+  const p = world.player;
+  z.flash = Math.max(0, z.flash - dt);
+  z.swipe = Math.max(0, z.swipe - dt);
+  const d = Math.hypot(p.x - z.x, p.y - z.y);
+  if (d <= ZOMBIE.reach + p.radius) {
+    z.attackTimer -= dt;
+    if (z.attackTimer <= 0) {
+      z.attackTimer = ZOMBIE.attackEvery;
+      z.swipe = 0.25;
+      world.hurtPlayer(ZOMBIE.damage);
+    }
+  } else {
+    z.attackTimer = ZOMBIE.windup;
+    const t = chaseTarget(z, world);
+    const b = boardedAlong(world, z.x, z.y, t.x, t.y);
+    if (b && Math.hypot(b.cx - z.x, b.cy - z.y) <= BARRICADE.breakReach) {
+      // At a boarded window: stand and tear off one board every breakEvery seconds.
+      z.tearTimer -= dt;
+      if (z.tearTimer <= 0) {
+        z.tearTimer = BARRICADE.breakEvery;
+        z.swipe = 0.25;
+        tearBoards(world, b, 1);
+      }
+    } else {
+      z.tearTimer = BARRICADE.breakEvery;
+      const goal = b ? approachPoint(b, z.x, z.y) : t;
+      steer(z, goal.x, goal.y, z.speed * dt);
+      z.anim += dt * z.speed * 3;
+    }
+  }
+  z.groan -= dt;
+  if (z.groan <= 0) {
+    z.groan = 4 + Math.random() * 5;
+    if (d < 9) world.audio.play('groan');
+  }
+}
+
+function updateBear(b, world, dt) {
+  const p = world.player;
+  b.flash = Math.max(0, b.flash - dt);
+  b.swipe = Math.max(0, b.swipe - dt);
+  const dx = p.x - b.x, dy = p.y - b.y, d = Math.hypot(dx, dy) || 1;
+  switch (b.state) {
+    case 'walk':
+      b.cooldown -= dt;
+      if (b.cooldown <= 0 && d >= BEAR.chargeMin && d <= BEAR.chargeMax && segmentClear(b.x, b.y, p.x, p.y)) {
+        b.state = 'windup';
+        b.timer = BEAR.windup;
+        b.dirX = dx / d; b.dirY = dy / d;
+        world.audio.play('roar');
+        break;
+      }
+      if (d <= BEAR.reach + p.radius) {
+        b.swipeTimer -= dt;
+        if (b.swipeTimer <= 0) {
+          b.swipeTimer = BEAR.swipeEvery;
+          b.swipe = 0.3;
+          world.hurtPlayer(BEAR.swipeDamage);
+        }
+      } else {
+        b.swipeTimer = BEAR.swipeWindup;
+        const t = chaseTarget(b, world);
+        const win = boardedAlong(world, b.x, b.y, t.x, t.y);
+        // The bear smashes a whole window in one blow.
+        if (win && Math.hypot(win.cx - b.x, win.cy - b.y) <= BARRICADE.breakReach + 0.3) { tearBoards(world, win, win.boards); world.shake(0.25); }
+        const goal = win && win.boards > 0 ? approachPoint(win, b.x, b.y) : t;
+        steer(b, goal.x, goal.y, BEAR.speed * dt);
+        b.anim += dt * 4;
+      }
+      break;
+    case 'windup':
+      b.timer -= dt;
+      if (b.timer > BEAR.lockAt) { b.dirX = dx / d; b.dirY = dy / d; }
+      if (b.timer <= 0) {
+        b.state = 'charge';
+        b.timer = BEAR.chargeTime;
+        b.hitPlayer = false;
+        b.charges++;
+        world.audio.play('charge');
+      }
+      break;
+    case 'charge': {
+      b.timer -= dt;
+      b.anim += dt * 12;
+      const blocked = moveCircle(b, b.dirX * BEAR.chargeSpeed * dt, b.dirY * BEAR.chargeSpeed * dt, b.radius);
+      if (!b.hitPlayer && Math.hypot(p.x - b.x, p.y - b.y) <= b.radius + p.radius + 0.2) {
+        b.hitPlayer = true;
+        world.hurtPlayer(BEAR.chargeDamage);
+        world.knockPlayer(b.dirX, b.dirY, BEAR.knockback);
+      }
+      if (blocked && !b.hitPlayer) {
+        const win = world.barricades.find(w => w.boards > 0 && Math.hypot(w.cx - b.x, w.cy - b.y) <= BARRICADE.breakReach + 0.3);
+        if (win) tearBoards(world, win, win.boards);
+        b.state = 'stunned';
+        b.timer = BEAR.stun;
+        world.audio.play('thud');
+        world.shake(0.4);
+      } else if (b.timer <= 0 || b.hitPlayer) {
+        b.state = 'walk';
+        b.cooldown = BEAR.cooldown;
+      }
+      break;
+    }
+    case 'stunned':
+      b.timer -= dt;
+      if (b.timer <= 0) { b.state = 'walk'; b.cooldown = BEAR.cooldown; }
+      break;
+  }
+}
+
+const nearWindow = e => WINDOWS.some(w => Math.abs(e.x - w.cx) < 1.5 && Math.abs(e.y - w.cy) < 1.5);
+
+export function separate(enemies) {
+  for (let i = 0; i < enemies.length; i++) {
+    for (let j = i + 1; j < enemies.length; j++) {
+      const a = enemies[i], b = enemies[j];
+      const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), min = a.radius + b.radius;
+      if (d >= min || d < 1e-4) continue;
+      const push = (min - d) / 2, nx = dx / d, ny = dy / d;
+      // A window is one tile wide: an even push can pin two zombies against the walls on either side of it.
+      // There they go single file instead: the later one gives way and the earlier one lines up with the gap.
+      const singleFile = a.kind === 'zombie' && b.kind === 'zombie' && nearWindow(a) && nearWindow(b);
+      const pushA = singleFile ? 0 : push, pushB = singleFile ? push * 2 : push;
+      if (pushA && !(a.kind === 'bear' && a.state === 'charge')) moveCircle(a, -nx * pushA, -ny * pushA, a.radius);
+      if (!(b.kind === 'bear' && b.state === 'charge')) moveCircle(b, nx * pushB, ny * pushB, b.radius);
+    }
+  }
+}
+
+// ---------- the game ----------
 
 export function createGame(api) {
-  const { W, H, palette: P, input, audio } = api;
-  const art = buildSprites(api);
-  const start = findTiles(ARENA, 'P')[0];
-  const spawns = findTiles(ARENA, 'S');
-  const zbuf = new Float32Array(W).fill(Infinity);
+  const { input, audio } = api;
+  const art = getArt(api.sprite);
+  useText(api.text);
+  let mode = 'title'; // title | play | won | lost
+  let modeTime = 0, clock = 0;
+  let world = null;
+  let reported = false;
 
-  const player = { x: start.x + 0.5, y: start.y + 0.5, angle: -Math.PI / 2, health: MAX_HEALTH };
-  let ghouls = [];
-  let waveIndex = -1;
-  let waveState = 'break';  // 'break' | 'wave'
-  let breakTime = 1.2;      // seconds until the next wave starts
-  let toSpawn = 0;
-  let spawnTimer = 0;
-  let banner = 'GET READY';
-  let bannerTime = 1.0;
-  let kills = 0;
-  let fireCooldown = 0;
-  let muzzle = 0, recoil = 0, hurt = 0, bob = 0, time = 0, hitMarker = 0;
-  let particles = [];
-  let over = false;
+  function setMode(m) { mode = m; modeTime = 0; }
 
-  const camera = () => makeCamera(player.x, player.y, player.angle, FOV_SCALE);
-
-  function moveCircle(body, dx, dy, r) {
-    if (!isSolid(ARENA, body.x + dx + Math.sign(dx) * r, body.y - r * 0.9) && !isSolid(ARENA, body.x + dx + Math.sign(dx) * r, body.y + r * 0.9)) body.x += dx;
-    if (!isSolid(ARENA, body.x - r * 0.9, body.y + dy + Math.sign(dy) * r) && !isSolid(ARENA, body.x + r * 0.9, body.y + dy + Math.sign(dy) * r)) body.y += dy;
+  function createWorld() {
+    const w = {
+      time: 0,
+      player: {
+        x: START.x + 0.5, y: START.y + 0.5, angle: -Math.PI / 2, radius: PLAYER.radius,
+        health: PLAYER.maxHealth, lastHurt: -99, hurtFlash: 0, god: false,
+        owned: new Set(['pistol']), weapon: 'pistol', cooldown: 0, trigger: 0, recoil: 0, muzzle: 0, raise: 0, bob: 0,
+      },
+      enemies: [], particles: [],
+      points: 0, earned: 0, kills: 0, purchases: [],
+      wave: -1, phase: 'intermission', phaseTime: INTERMISSION.first, waveTime: 0,
+      toSpawn: 0, bearPending: false, spawnTimer: 0, bear: null, director: true,
+      banner: { text: 'SURVIVE THE NIGHT', sub: 'WAVE 1 IS COMING', time: INTERMISSION.first },
+      hitMarker: 0, shakeTime: 0, rumbleTime: 0, denyTime: 0,
+      barricades: WINDOWS.map((win, i) => ({ ...win, id: i, boards: BARRICADE.boards, rewarded: 0 })),
+      repair: { target: null, progress: 0 }, repairs: 0, boardsTorn: 0,
+      warning: null, warned: new Set(),
+      mission: newMission(),
+      nav: createNav(), audio,
+      hurtPlayer, knockPlayer, burst,
+      shake: t => { w.shakeTime = Math.max(w.shakeTime, t); },
+    };
+    w.boardedAt = (tx, ty) => w.barricades.find(b => b.boards > 0 && b.x === tx && b.y === ty) ?? null;
+    w.boardedCheck = (tx, ty) => w.boardedAt(tx, ty) !== null;
+    setBoardedCheck(w.boardedCheck);
+    w.nav.update(w.player.x, w.player.y);
+    return w;
   }
 
-  function startWave() {
-    waveIndex++;
-    waveState = 'wave';
-    toSpawn = WAVES[waveIndex];
-    spawnTimer = 0.2;
-    banner = `WAVE ${waveIndex + 1}`;
-    bannerTime = 1.6;
-    audio.play('wave');
+  function hurtPlayer(amount) {
+    const p = world.player;
+    p.hurtFlash = 0.35;
+    p.lastHurt = world.time;
+    world.shake(0.15);
+    audio.play('hurt');
+    if (p.god) return;
+    p.health = Math.max(0, p.health - amount);
+    if (p.health <= 0) endRun(false);
   }
 
-  function spawnGhoul() {
-    const far = spawns.filter(s => Math.hypot(s.x + 0.5 - player.x, s.y + 0.5 - player.y) > 6);
-    const pool = far.length ? far : spawns;
-    const s = pool[Math.floor(Math.random() * pool.length)];
-    ghouls.push({
-      x: s.x + 0.5, y: s.y + 0.5, hp: GHOUL.hp, flash: 0,
-      speed: GHOUL.baseSpeed + waveIndex * GHOUL.speedPerWave + Math.random() * 0.2,
-      attackTimer: 0.6, phase: Math.random() * 6,
-    });
+  function knockPlayer(dx, dy, dist) {
+    for (let i = 0; i < 4; i++) moveCircle(world.player, (dx * dist) / 4, (dy * dist) / 4, world.player.radius);
   }
 
-  function fire() {
-    fireCooldown = FIRE_COOLDOWN;
-    muzzle = 0.06;
-    recoil = 1;
-    audio.play('shoot');
-    const cam = camera();
-    const center = W / 2;
-    let target = null, best = Infinity;
-    for (const gh of ghouls) {
-      const { screenX, depth } = project(cam, gh.x, gh.y, W);
-      if (depth <= 0.15 || depth >= zbuf[center | 0]) continue;
-      const halfWidth = ((H / depth) * 0.75 * (12 / 15)) / 2;
-      if (Math.abs(screenX - center) < halfWidth * 0.85 && depth < best) { best = depth; target = gh; }
-    }
-    if (!target) return;
-    target.hp--;
-    target.flash = 0.12;
-    // knockback
-    const d = Math.hypot(target.x - player.x, target.y - player.y) || 1;
-    moveCircle(target, ((target.x - player.x) / d) * 0.25, ((target.y - player.y) / d) * 0.25, GHOUL.radius);
-    hitMarker = 0.12;
-    if (target.hp <= 0) {
-      ghouls = ghouls.filter(gh => gh !== target);
-      kills++;
-      burst(target.x, target.y);
-      audio.play('explode');
-    } else {
-      audio.play('hit');
-    }
-  }
-
-  // Pixel debris flung out of a defeated ghoul (z = height in wall units).
-  function burst(x, y) {
-    const colors = [P.green, P.green, P.violet, P.red];
-    for (let i = 0; i < 14; i++) {
-      const a = Math.random() * Math.PI * 2, s = 0.6 + Math.random() * 1.2;
-      particles.push({
-        x, y, z: 0.35 + Math.random() * 0.25,
-        vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: 0.6 + Math.random() * 0.9,
-        life: 0.7 + Math.random() * 0.4, color: colors[i % colors.length],
+  function burst(x, y, z, colors, n, speed) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, s = speed * (0.3 + Math.random() * 0.7);
+      world.particles.push({
+        x, y, z, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: 0.6 + Math.random() * 1.2,
+        life: 0.4 + Math.random() * 0.5, color: colors[i % colors.length], size: 0.03 + Math.random() * 0.03,
       });
     }
   }
 
-  function updateParticles(dt) {
-    for (const pt of particles) {
-      pt.x += pt.vx * dt;
-      pt.y += pt.vy * dt;
-      pt.vz -= 3 * dt;
-      pt.z = Math.max(0, pt.z + pt.vz * dt);
-      pt.life -= dt;
-    }
-    particles = particles.filter(pt => pt.life > 0);
+  function startRun() {
+    world = createWorld();
+    setMode('play');
+    audio.play('select');
+    input.lockPointer();
   }
 
-  function drawParticles(g, cam) {
-    for (const pt of particles) {
-      const { screenX, depth } = project(cam, pt.x, pt.y, W);
-      const col = Math.round(screenX);
-      if (depth <= 0.2 || col < 0 || col >= W || depth >= zbuf[col]) continue;
-      const full = H / depth;
-      const size = Math.max(1, Math.round(full * 0.05));
-      g.fillStyle = pt.color;
-      g.fillRect(col, Math.round(H / 2 + full / 2 - pt.z * full), size, size);
-    }
+  // The card shows for END_CARD seconds, then api.finish hands over to the arcade's result menu
+  // (which records the score and plays the win/lose jingle).
+  function endRun(won) {
+    if (mode !== 'play') return;
+    setMode(won ? 'won' : 'lost');
+    input.unlockPointer();
   }
 
-  function drawMinimap(g) {
-    const s = 2, ox = 4, oy = H - 16 - ARENA.length * s;
-    g.fillStyle = P.black;
-    g.fillRect(ox - 1, oy - 1, ARENA[0].length * s + 2, ARENA.length * s + 2);
-    ARENA.forEach((row, y) => [...row].forEach((c, x) => {
-      if (c === '#' || c === 'B') {
-        g.fillStyle = c === '#' ? P.brown : P.teal;
-        g.fillRect(ox + x * s, oy + y * s, s, s);
+  // ----- waves -----
+
+  function pickSpawn(farthest = false) {
+    const p = world.player;
+    const byDist = [...SPAWNS].sort((a, b) => Math.hypot(b.x - p.x, b.y - p.y) - Math.hypot(a.x - p.x, a.y - p.y));
+    if (farthest) return byDist[0];
+    const far = byDist.filter(s => Math.hypot(s.x + 0.5 - p.x, s.y + 0.5 - p.y) >= 6);
+    const pool = far.length ? far : byDist;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  function beginWave() {
+    world.wave++;
+    const cfg = WAVES[world.wave];
+    world.phase = 'active';
+    world.waveTime = 0;
+    world.toSpawn = cfg.zombies;
+    world.bearPending = cfg.bear;
+    world.spawnTimer = 0.5;
+    for (const b of world.barricades) b.rewarded = 0; // repair rewards are capped per window per wave
+    world.banner = { text: `WAVE ${world.wave + 1}`, sub: cfg.bear ? 'SOMETHING BIG IS AWAKE' : `${cfg.zombies} ZOMBIES`, time: 2 };
+    audio.play('wave');
+  }
+
+  function updateWaves(dt) {
+    if (world.phase === 'intermission') {
+      // The creek mission holds the countdown (and the bear warning) until it is finished or skipped.
+      if (missionActive(world)) return;
+      // Preparation break: no spawns. Runs on game time, so the arcade's pause freezes it.
+      const before = world.phaseTime;
+      world.phaseTime -= dt;
+      if (world.wave >= 0 && [3, 2, 1].some(s => before > s && world.phaseTime <= s)) audio.play('blip');
+      // The bear announces itself during the last seconds before its wave, once per appearance.
+      const next = world.wave + 1;
+      if (WAVES[next]?.bear && !world.warned.has(next) && world.phaseTime <= BEAR_WARNING.lead) {
+        world.warned.add(next);
+        world.warning = { t: 0, step: 0, roared: false };
       }
-    }));
-    g.fillStyle = P.red;
-    for (const gh of ghouls) g.fillRect(ox + Math.floor(gh.x * s) - 1, oy + Math.floor(gh.y * s) - 1, 2, 2);
-    const px = ox + Math.floor(player.x * s), py = oy + Math.floor(player.y * s);
-    g.fillStyle = P.yellow;
-    g.fillRect(px + Math.round(Math.cos(player.angle) * 3), py + Math.round(Math.sin(player.angle) * 3), 1, 1);
-    g.fillStyle = P.cream;
-    g.fillRect(px - 1, py - 1, 2, 2);
+      if (world.phaseTime <= 0) beginWave();
+      return;
+    }
+    const cfg = WAVES[world.wave];
+    world.waveTime += dt;
+    world.spawnTimer -= dt;
+    const alive = world.enemies.filter(e => e.kind === 'zombie').length;
+    if (world.toSpawn > 0 && world.spawnTimer <= 0 && alive < MAX_ALIVE) {
+      const s = pickSpawn();
+      world.enemies.push(makeZombie(s.x + 0.5, s.y + 0.5, world.wave));
+      world.toSpawn--;
+      world.spawnTimer = cfg.spawnEvery;
+    }
+    if (world.bearPending && world.waveTime >= cfg.bearAfter) {
+      const s = pickSpawn(true);
+      world.bear = makeBear(s.x + 0.5, s.y + 0.5);
+      world.enemies.push(world.bear);
+      world.bearPending = false;
+      world.banner = { text: 'THE RED BEAR', sub: 'WATCH FOR ITS CHARGE', time: 2.5 };
+      audio.play('roar');
+      world.shake(0.5);
+    }
+    if (world.toSpawn === 0 && !world.bearPending && world.enemies.length === 0) {
+      if (world.wave === WAVES.length - 1) { endRun(true); return; }
+      world.phase = 'intermission';
+      world.phaseTime = INTERMISSION.between;
+      world.banner = { text: `WAVE ${world.wave + 1} CLEARED`, sub: 'BUY GUNS - REPAIR THE WINDOWS', time: 3 };
+      audio.play('clear');
+      if (world.wave === MISSION.afterWave && world.mission.state === 'waiting') setMission('pending');
+    }
   }
 
-  function end(won) {
-    over = true;
-    api.finish({ won, score: kills * 100 + (won ? Math.max(0, Math.round(player.health)) : 0) });
+  // ----- creek mission -----
+
+  function setMission(state) {
+    world.mission.state = state;
+    world.mission.time = 0;
+  }
+
+  function collectLitter(l) {
+    const m = world.mission;
+    if (m.collected.includes(l.id)) return;
+    m.collected.push(l.id);
+    audio.play('pickup');
+    burst(l.x, l.y, 0.1, ['#efe3c2', '#f2c94c'], 6, 0.8);
+    if (m.collected.length < LITTER.length) return;
+    if (!m.cleanupRewarded) {
+      m.cleanupRewarded = true;
+      m.bonus += MISSION.cleanupBonus;
+      world.points += MISSION.cleanupBonus; // spendable, but kept out of the combat score (world.earned)
+    }
+    audio.play('clear');
+    setMission('explain');
+  }
+
+  function quizPick() {
+    if (input.wasPressed('KeyA', 'Digit1')) return 'A';
+    if (input.wasPressed('KeyB', 'Digit2')) return 'B';
+    if (input.wasPressed('KeyC', 'Digit3')) return 'C';
+    const m = input.mouse;
+    if (m.pressed && !input.pointerLocked) {
+      const hit = quizOptionRects().find(r => m.x >= r.x && m.x < r.x + r.w && m.y >= r.y && m.y < r.y + r.h);
+      if (hit) return hit.id;
+    }
+    return null;
+  }
+
+  function answerQuiz(choice) {
+    const m = world.mission;
+    m.answers.push(choice);
+    m.feedback = choice;
+    if (!QUIZ_ANSWERS[choice]) { audio.play('deny'); return; } // wrong: explain and let them retry, nothing lost
+    m.correct = true;
+    if (!m.lessonRewarded) {
+      m.lessonRewarded = true;
+      m.bonus += MISSION.lessonBonus;
+      world.points += MISSION.lessonBonus;
+    }
+    audio.play('buy');
+    setMission('answered');
+  }
+
+  function endMission(state, text) {
+    setMission(state);
+    world.banner = { text, sub: 'NEXT WAVE COUNTDOWN RESUMED', time: 2.5 };
+  }
+
+  function updateMission(dt) {
+    const m = world.mission;
+    if (!MISSION_ACTIVE.has(m.state)) return;
+    m.time += dt;
+    if (input.wasPressed('KeyN')) { endMission('skipped', 'MISSION SKIPPED'); audio.play('blip'); return; }
+    switch (m.state) {
+      case 'pending': // wait for the wave-cleared banner, then the ranger speaks
+        if (world.banner.time <= 0) { setMission('cleanup'); audio.play('talk'); }
+        break;
+      case 'explain':
+        if (m.time >= MISSION.explainTime || input.wasPressed('Enter')) { setMission('quiz'); input.unlockPointer(); }
+        break;
+      case 'quiz': {
+        const pick = quizPick();
+        if (pick) answerQuiz(pick);
+        break;
+      }
+      case 'answered':
+        if (m.time > 0.3 && (input.wasPressed('Enter', 'Space') || input.mouse.pressed)) endMission('done', 'CREEK PROTECTED');
+        break;
+    }
+  }
+
+  /** Footsteps, then a distant roar, on game time: pausing freezes it, a restart or exit drops it with the run. */
+  function updateWarning(dt) {
+    const wn = world.warning;
+    if (!wn) return;
+    wn.t += dt;
+    while (wn.step < BEAR_WARNING.steps.length && wn.t >= BEAR_WARNING.steps[wn.step]) {
+      wn.step++;
+      audio.play('bearStep');
+      world.rumbleTime = Math.max(world.rumbleTime, BEAR_WARNING.rumble);
+    }
+    if (!wn.roared && wn.t >= BEAR_WARNING.roarAt) {
+      wn.roared = true;
+      audio.play('bearCall');
+      world.rumbleTime = Math.max(world.rumbleTime, 0.5);
+    }
+    if (wn.t >= BEAR_WARNING.duration) world.warning = null;
+  }
+
+  // ----- player -----
+
+  function damageEnemy(e, amount) {
+    e.hp -= amount;
+    e.flash = 0.08;
+    if (e.hp > 0 || e.dead) return;
+    e.dead = true;
+    if (e.kind === 'bear') {
+      world.points += SCORE.bearKill; world.earned += SCORE.bearKill;
+      world.bear = null;
+      world.banner = { text: 'THE BEAR FALLS', sub: world.enemies.some(o => !o.dead) ? 'FINISH THE REST' : '', time: 2.5 };
+      audio.play('bearDie');
+      world.shake(0.6);
+      burst(e.x, e.y, 0.5, ['#8c1c24', '#d0342c', '#6e4128'], 26, 2.2);
+    } else {
+      world.points += SCORE.kill; world.earned += SCORE.kill;
+      audio.play('zdie');
+      burst(e.x, e.y, 0.5, ['#8c1c24', '#5f8a3c', '#d0342c'], 12, 1.6);
+    }
+    world.kills++;
+  }
+
+  function fire(w) {
+    const p = world.player;
+    p.cooldown = w.cooldown;
+    p.recoil = w.recoil;
+    p.muzzle = 0.06;
+    audio.play(w.id);
+    const { hits, impacts } = traceShot(world, w);
+    for (const h of hits) {
+      damageEnemy(h.enemy, h.damage);
+      burst(h.x, h.y, 0.55, ['#8c1c24', '#d0342c'], 3, 0.8);
+    }
+    for (const i of impacts) burst(i.x, i.y, 0.5, ['#a8754a', '#6b6a7a'], 2, 0.6);
+    if (hits.length) {
+      world.points += SCORE.hit; world.earned += SCORE.hit;
+      world.hitMarker = 0.12;
+      audio.play(hits.some(h => h.enemy.kind === 'bear') ? 'bearHit' : 'hit');
+    }
+    world.enemies = world.enemies.filter(e => !e.dead);
+  }
+
+  function updatePlayer(dt) {
+    const p = world.player;
+    if (input.pointerLocked) p.angle += input.mouse.dx * PLAYER.mouseSens;
+    if (input.isDown('ArrowLeft')) p.angle -= PLAYER.turnSpeed * dt;
+    if (input.isDown('ArrowRight')) p.angle += PLAYER.turnSpeed * dt;
+
+    const fwd = (input.isDown('KeyW', 'ArrowUp') ? 1 : 0) - (input.isDown('KeyS', 'ArrowDown') ? 1 : 0);
+    const side = (input.isDown('KeyD') ? 1 : 0) - (input.isDown('KeyA') ? 1 : 0);
+    const cx = Math.cos(p.angle), cy = Math.sin(p.angle);
+    let mx = cx * fwd - cy * side, my = cy * fwd + cx * side;
+    const len = Math.hypot(mx, my);
+    if (len > 0) {
+      mx /= len; my /= len;
+      moveCircle(p, mx * PLAYER.speed * dt, my * PLAYER.speed * dt, p.radius);
+      p.bob += dt * 9;
+    }
+    for (const e of world.enemies) {
+      const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy), min = p.radius + e.radius;
+      if (d < min && d > 1e-4) moveCircle(p, (dx / d) * (min - d), (dy / d) * (min - d), p.radius);
+    }
+
+    if (world.time - p.lastHurt > PLAYER.regenDelay) p.health = Math.min(PLAYER.maxHealth, p.health + PLAYER.regenPerSec * dt);
+
+    // Weapons: 1 2 3 pick an owned gun, Q cycles.
+    WEAPON_ORDER.forEach((id, i) => {
+      if (input.wasPressed(`Digit${i + 1}`) && p.owned.has(id) && p.weapon !== id) { equip(p, id); audio.play('equip'); }
+    });
+    if (input.wasPressed('KeyQ') && p.owned.size > 1) {
+      const owned = WEAPON_ORDER.filter(id => p.owned.has(id));
+      equip(p, owned[(owned.indexOf(p.weapon) + 1) % owned.length]);
+      audio.play('equip');
+    }
+
+    // E does one thing per press, in priority order: wall gun, then litter, then (held) window repair.
+    const buy = findBuyNear(p);
+    const litter = buy ? null : findLitterNear(world);
+    if (buy && input.wasPressed('KeyE')) {
+      const r = tryBuy(world, buy);
+      if (r.reason === 'bought') { audio.play('buy'); world.purchases.push(buy.weapon); }
+      else if (r.reason === 'equipped') audio.play('equip');
+      else if (!r.ok) { audio.play('deny'); world.denyTime = 0.6; }
+    }
+    if (litter && input.wasPressed('KeyE')) collectLitter(litter);
+    updateRepair(buy || litter ? null : findRepairNear(world), dt);
+
+    const w = WEAPONS[p.weapon];
+    const mouseFire = input.pointerLocked && (w.auto ? input.mouse.down : input.mouse.pressed);
+    const keyFire = w.auto ? input.isDown('Space') : input.wasPressed('Space');
+    if (!w.auto && (mouseFire || keyFire)) p.trigger = 0.15; // buffer a semi-auto press made during cooldown
+    p.cooldown -= dt;
+    if (p.cooldown <= 0 && (w.auto ? mouseFire || keyFire : p.trigger > 0)) { p.trigger = 0; fire(w); }
+    p.trigger = Math.max(0, p.trigger - dt);
+    p.recoil = Math.max(0, p.recoil - dt * 60);
+    p.muzzle = Math.max(0, p.muzzle - dt);
+    p.raise = Math.max(0, p.raise - dt * 4);
+    p.hurtFlash = Math.max(0, p.hurtFlash - dt);
+  }
+
+  /** Hold E at a window to hammer boards back one at a time. Releasing E or walking off cancels the board in progress. */
+  function updateRepair(fix, dt) {
+    const r = world.repair;
+    if (fix && input.wasPressed('KeyE')) { r.target = fix; r.progress = 0; }
+    else if (!input.isDown('KeyE') || r.target !== fix) { r.target = null; r.progress = 0; }
+    const b = r.target;
+    if (!b || b.boards >= BARRICADE.boards || windowBlocked(world, b)) { r.progress = 0; return; }
+    r.progress += dt / BARRICADE.repairTime;
+    if (r.progress < 1) return;
+    r.progress = 0;
+    b.boards++;
+    world.repairs++;
+    const pts = Math.min(BARRICADE.repairPoints, BARRICADE.rewardCapPerWave - b.rewarded);
+    if (pts > 0) { world.points += pts; world.earned += pts; b.rewarded += pts; }
+    audio.play('board');
+  }
+
+  function updateParticles(dt) {
+    for (const q of world.particles) {
+      q.x += q.vx * dt; q.y += q.vy * dt; q.z += q.vz * dt;
+      q.vz -= 4 * dt;
+      if (q.z < 0) { q.z = 0; q.vx *= 0.4; q.vy *= 0.4; q.vz = 0; }
+      q.life -= dt;
+    }
+    world.particles = world.particles.filter(q => q.life > 0);
+  }
+
+  function updatePlay(dt) {
+    const modal = missionModal(world); // the creek question: no moving or shooting, the mouse is free to click answers
+    if (!modal && input.mouse.pressed && !input.pointerLocked) input.lockPointer(); // this click never fires: aiming needs the lock
+    setBoardedCheck(world.boardedCheck); // collision always uses this run's barricades
+    world.time += dt;
+    if (!modal) updatePlayer(dt);
+    if (mode !== 'play') return;
+    world.nav.update(world.player.x, world.player.y);
+    for (const e of world.enemies) (e.kind === 'bear' ? updateBear : updateZombie)(e, world, dt);
+    if (mode !== 'play') return;
+    separate(world.enemies);
+    if (world.director) updateWaves(dt);
+    updateMission(dt);
+    updateWarning(dt);
+    updateParticles(dt);
+    world.banner.time -= dt;
+    world.hitMarker = Math.max(0, world.hitMarker - dt);
+    world.shakeTime = Math.max(0, world.shakeTime - dt);
+    world.rumbleTime = Math.max(0, world.rumbleTime - dt);
+    world.denyTime = Math.max(0, world.denyTime - dt);
+  }
+
+  function update(dt) {
+    clock += dt;
+    modeTime += dt;
+    switch (mode) {
+      case 'title':
+        if (input.wasPressed('Enter', 'Space') || input.mouse.pressed) startRun();
+        break;
+      case 'play':
+        updatePlay(dt);
+        break;
+      case 'won':
+      case 'lost':
+        updateParticles(dt);
+        if (!reported && modeTime >= END_CARD) {
+          reported = true;
+          api.finish({ won: mode === 'won', score: world.earned });
+        }
+        break;
+    }
+  }
+
+  function remaining() {
+    return world.toSpawn + world.enemies.filter(e => e.kind === 'zombie').length;
+  }
+
+  function draw(g) {
+    g.imageSmoothingEnabled = false;
+    if (mode === 'title') { drawTitle(g, art, clock, api.best); return; }
+    const buy = mode === 'play' && findBuyNear(world.player);
+    const litter = mode === 'play' && !buy && findLitterNear(world);
+    const fix = mode === 'play' && !buy && !litter && findRepairNear(world);
+    drawFrame(g, art, world, {
+      clock, locked: input.pointerLocked, live: mode === 'play', remaining: remaining(),
+      buy: buy && { weapon: WEAPONS[buy.weapon], owned: world.player.owned.has(buy.weapon), equipped: world.player.weapon === buy.weapon, affordable: world.points >= WEAPONS[buy.weapon].price, denied: world.denyTime > 0 },
+      repair: fix && {
+        boards: fix.boards, max: BARRICADE.boards, blocked: windowBlocked(world, fix),
+        progress: world.repair.target === fix ? world.repair.progress : 0,
+        capped: fix.rewarded >= BARRICADE.rewardCapPerWave,
+      },
+      litter: litter && litter.name,
+    });
+    if (mode === 'won' || mode === 'lost') drawEnd(g, world, mode === 'won', modeTime);
+  }
+
+  /** Plain snapshot for the arcade's debug() and the test bots. Never changes state. */
+  function debug() {
+    if (!world) return { mode, wave: 0 };
+    const p = world.player;
+    return {
+      mode, wave: world.wave + 1, phase: world.phase, points: world.points, score: world.earned, kills: world.kills,
+      purchases: [...world.purchases], remaining: remaining(),
+      player: { x: p.x, y: p.y, angle: p.angle, health: p.health, weapon: p.weapon, owned: [...p.owned] },
+      enemies: world.enemies.map(e => ({ kind: e.kind, x: e.x, y: e.y, hp: e.hp, state: e.state ?? null })),
+      bear: world.bear && { hp: world.bear.hp, maxHp: world.bear.maxHp, state: world.bear.state, charges: world.bear.charges },
+      phaseTime: world.phaseTime,
+      barricades: world.barricades.map(b => ({ x: b.x, y: b.y, boards: b.boards, rewarded: b.rewarded })),
+      repairs: world.repairs, boardsTorn: world.boardsTorn,
+      warning: world.warning && { t: world.warning.t }, warned: [...world.warned],
+      mission: { ...world.mission, collected: [...world.mission.collected], answers: [...world.mission.answers], active: missionActive(world) },
+    };
   }
 
   return {
-    update(dt) {
-      if (over) return;
-      time += dt;
-
-      // Aim: mouse while captured, keyboard always. First click captures the mouse.
-      if (input.mouse.pressed && !input.pointerLocked) input.lockPointer();
-      player.angle += input.mouse.dx * MOUSE_SENS;
-      if (input.isDown('ArrowLeft', 'KeyQ')) player.angle -= TURN_SPEED * dt;
-      if (input.isDown('ArrowRight', 'KeyE')) player.angle += TURN_SPEED * dt;
-
-      // Move: forward/back along view, strafe sideways.
-      const dirX = Math.cos(player.angle), dirY = Math.sin(player.angle);
-      let mx = 0, my = 0;
-      if (input.isDown('KeyW', 'ArrowUp')) { mx += dirX; my += dirY; }
-      if (input.isDown('KeyS', 'ArrowDown')) { mx -= dirX; my -= dirY; }
-      if (input.isDown('KeyD')) { mx -= dirY; my += dirX; }
-      if (input.isDown('KeyA')) { mx += dirY; my -= dirX; }
-      const len = Math.hypot(mx, my);
-      if (len > 0) {
-        moveCircle(player, (mx / len) * MOVE_SPEED * dt, (my / len) * MOVE_SPEED * dt, PLAYER_RADIUS);
-        bob += dt * 10;
-      }
-
-      // Shoot
-      fireCooldown -= dt;
-      const trigger = input.isDown('Space') || input.mouse.down || input.mouse.pressed;
-      if (trigger && fireCooldown <= 0) fire();
-
-      // Waves: 'break' counts down to the next wave; 'wave' spawns ghouls until all are dead.
-      if (waveState === 'break') {
-        breakTime -= dt;
-        if (breakTime <= 0) startWave();
-      } else {
-        if (toSpawn > 0) {
-          spawnTimer -= dt;
-          if (spawnTimer <= 0) { spawnGhoul(); toSpawn--; spawnTimer = 0.7; }
-        } else if (ghouls.length === 0) {
-          if (waveIndex === WAVES.length - 1) { end(true); return; }
-          waveState = 'break';
-          breakTime = 2.4;
-          banner = 'WAVE CLEARED  +HP';
-          bannerTime = 2;
-          player.health = Math.min(MAX_HEALTH, player.health + WAVE_HEAL);
-          audio.play('heal');
-        }
-      }
-
-      // Ghouls chase and claw
-      for (const gh of ghouls) {
-        gh.flash = Math.max(0, gh.flash - dt);
-        const dx = player.x - gh.x, dy = player.y - gh.y;
-        const d = Math.hypot(dx, dy) || 1;
-        if (d > GHOUL.reach * 0.85) {
-          moveCircle(gh, (dx / d) * gh.speed * dt, (dy / d) * gh.speed * dt, GHOUL.radius);
-        }
-        gh.attackTimer -= dt;
-        if (d < GHOUL.reach && gh.attackTimer <= 0) {
-          gh.attackTimer = GHOUL.attackEvery;
-          player.health -= GHOUL.damage;
-          hurt = 0.35;
-          audio.play('hurt');
-        }
-      }
-      // Keep ghouls from stacking on one spot
-      for (let i = 0; i < ghouls.length; i++) {
-        for (let j = i + 1; j < ghouls.length; j++) {
-          const a = ghouls[i], b = ghouls[j];
-          const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
-          if (d > 0 && d < 0.55) {
-            const push = (0.55 - d) / 2;
-            moveCircle(a, (-dx / d) * push, (-dy / d) * push, GHOUL.radius);
-            moveCircle(b, (dx / d) * push, (dy / d) * push, GHOUL.radius);
-          }
-        }
-      }
-
-      updateParticles(dt);
-      hitMarker = Math.max(0, hitMarker - dt);
-      muzzle = Math.max(0, muzzle - dt);
-      recoil = Math.max(0, recoil - dt * 6);
-      hurt = Math.max(0, hurt - dt);
-      bannerTime = Math.max(0, bannerTime - dt);
-      if (player.health <= 0) { player.health = 0; end(false); }
-    },
-
-    draw(g) {
-      const cam = camera();
-      // Ceiling + banded floor
-      g.fillStyle = P.night;
-      g.fillRect(0, 0, W, H / 2);
-      g.fillStyle = P.black;
-      g.fillRect(0, H / 2, W, H / 2);
-      g.fillStyle = P.indigo;
-      g.fillRect(0, H / 2 + 22, W, H / 2 - 22);
-      g.fillStyle = P.violet;
-      g.fillRect(0, H - 22, W, 22);
-
-      drawWalls(g, ARENA, cam, W, H, zbuf, art.wallShades);
-
-      // Ghouls, far to near
-      const sorted = ghouls
-        .map(gh => ({ gh, d: (gh.x - player.x) ** 2 + (gh.y - player.y) ** 2 }))
-        .sort((a, b) => b.d - a.d);
-      for (const { gh } of sorted) {
-        const sway = Math.sin(time * 8 + gh.phase) * 0.02;
-        drawBillboard(g, gh.flash > 0 ? art.ghoulHurt : art.ghoul, cam, gh.x, gh.y, W, H, zbuf, 0.75, Math.max(0, sway));
-      }
-      drawParticles(g, cam);
-
-      // Blaster with walk bob + recoil, and muzzle flash
-      const scale = 3;
-      const gw = art.blaster.width * scale, gh = art.blaster.height * scale;
-      const gx = Math.round(W / 2 - gw / 2 + Math.sin(bob) * 3);
-      const gy = Math.round(H - gh + 4 + Math.abs(Math.cos(bob)) * 2 + recoil * 5);
-      if (muzzle > 0) g.drawImage(art.flash, W / 2 - 12, gy - 14, art.flash.width * 3, art.flash.height * 3);
-      g.drawImage(art.blaster, gx, gy, gw, gh);
-
-      // Crosshair (red flash on a hit)
-      g.fillStyle = hitMarker > 0 ? P.red : P.cream;
-      g.fillRect(W / 2 - 5, H / 2, 3, 1);
-      g.fillRect(W / 2 + 3, H / 2, 3, 1);
-      g.fillRect(W / 2, H / 2 - 5, 1, 3);
-      g.fillRect(W / 2, H / 2 + 3, 1, 3);
-
-      // Damage flash
-      if (hurt > 0) {
-        g.globalAlpha = Math.min(0.5, hurt);
-        g.fillStyle = P.red;
-        g.fillRect(0, 0, W, H);
-        g.globalAlpha = 1;
-      }
-
-      // HUD
-      drawMinimap(g);
-      const hpW = 60;
-      g.fillStyle = P.black;
-      g.fillRect(4, H - 12, hpW + 18, 9);
-      api.text(g, 'HP', 6, H - 10, P.cream);
-      g.fillStyle = P.maroon;
-      g.fillRect(16, H - 10, hpW, 5);
-      g.fillStyle = player.health > 35 ? P.green : P.red;
-      g.fillRect(16, H - 10, Math.round((hpW * player.health) / MAX_HEALTH), 5);
-      const left = Math.max(0, toSpawn) + ghouls.length;
-      api.text(g, `WAVE ${Math.max(1, waveIndex + 1)}/${WAVES.length}`, 4, 4, P.cream, { shadow: P.black });
-      api.text(g, `KILLS ${kills}`, 4, 11, P.cream, { shadow: P.black });
-      if (waveIndex >= 0) api.text(g, `GHOULS ${left}`, W - 4, H - 10, P.cream, { align: 'right', shadow: P.black });
-      if (!input.pointerLocked && Math.sin(time * 5) > -0.2) {
-        api.text(g, 'CLICK TO AIM WITH MOUSE  /  ARROWS TURN', W / 2, 22, P.yellow, { align: 'center', shadow: P.black });
-      }
-      if (bannerTime > 0) {
-        api.text(g, banner, W / 2, H / 2 - 30, P.yellow, { scale: 2, align: 'center', shadow: P.black });
-      }
-    },
-
-    destroy() {},
-
-    debug() {
-      return {
-        player: { x: player.x, y: player.y, angle: player.angle, health: player.health },
-        ghouls: ghouls.map(gh => ({ x: gh.x, y: gh.y, hp: gh.hp })),
-        wave: waveIndex + 1, waveState, toSpawn, kills,
-      };
-    },
+    update, draw, debug,
+    // No DOM listeners, timers or loops of its own; only the shared collision hook for boarded windows.
+    destroy() { setBoardedCheck(null); },
+    // Used by tests/bear-unit.mjs to drive scenarios directly.
+    get mode() { return mode; },
+    get world() { return world; },
+    start: startRun,
   };
 }

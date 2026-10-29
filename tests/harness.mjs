@@ -11,6 +11,16 @@ function stubContext() {
   });
 }
 
+// PIXEL CHIC builds its canvases with document.createElement instead of api.sprite and recolors them
+// through getImageData/putImageData; give it stub canvases with blank pixel buffers.
+function stubCanvasContext() {
+  const ctx = stubContext();
+  ctx.getImageData = (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h });
+  return ctx;
+}
+globalThis.ImageData ??= class { constructor(data, width, height) { Object.assign(this, { data, width, height }); } };
+globalThis.document ??= { createElement: () => ({ width: 0, height: 0, getContext: stubCanvasContext, toDataURL: () => '' }) };
+
 export async function runGame(id, bot, { seconds = 180, dt = 1 / 60, drawEvery = 10 } = {}) {
   const mod = await import(new URL(`../src/games/${id}/index.js`, import.meta.url));
   const held = new Set();

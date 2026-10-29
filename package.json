@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node tests/run-headless.mjs"
+    "test": "node tests/run-headless.mjs && node tests/bear-unit.mjs"
   },
   "engines": {
     "node": ">=18"
