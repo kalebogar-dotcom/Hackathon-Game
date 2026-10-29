@@ -1,9 +1,9 @@
 // Bear in the Red Woods unit checks: the real shooter modules run headless against a stub arcade api
 // with a seeded RNG. Covers map, purchases, weapons, navigation, the bear's charge and the finish handoff.
 // Usage: node tests/bear-unit.mjs   (also part of `npm test`)
-import { createGame, tryBuy, traceShot, makeZombie, makeBear, findBuyNear, findRepairNear, windowBlocked } from '../src/games/shooter/index.js';
-import { MAP, MAP_W, MAP_H, WALL_BUYS, WINDOWS, findTiles, isWallTile, isWall, isWalkableTile, createNav, insideCabin } from '../src/games/shooter/world.js';
-import { WEAPONS, BEAR, BARRICADE, INTERMISSION, BEAR_WARNING, WAVES } from '../src/games/shooter/config.js';
+import { createGame, tryBuy, traceShot, makeZombie, makeBear, findBuyNear, findRepairNear, windowBlocked, findLitterNear } from '../src/games/shooter/index.js';
+import { MAP, MAP_W, MAP_H, WALL_BUYS, WINDOWS, LITTER, findTiles, isWallTile, isWall, isWalkableTile, createNav, insideCabin, inCreek } from '../src/games/shooter/world.js';
+import { WEAPONS, BEAR, BARRICADE, INTERMISSION, BEAR_WARNING, WAVES, MISSION } from '../src/games/shooter/config.js';
 
 let seed = 12345;
 Math.random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
@@ -335,6 +335,7 @@ const north = () => WINDOWS.find(w => w.axis === 'x');
   w.toSpawn = 0; w.enemies = []; // clear wave 1
   h.step(0.05);
   check('clearing a non-final wave starts a 12 s break', w.phase === 'intermission' && w.wave === 0 && Math.abs(w.phaseTime - INTERMISSION.between) < 0.1, `phaseTime=${w.phaseTime.toFixed(2)}`);
+  h.tap('KeyN'); h.step(0.02); // skip the creek mission that this break hosts
   const s0 = h.sounds.length;
   let most = 0;
   const waves = new Set();
@@ -375,6 +376,7 @@ const north = () => WINDOWS.find(w => w.axis === 'x');
   const clearWave = () => { w.toSpawn = 0; w.enemies = []; w.bearPending = false; };
   h.step(INTERMISSION.first + 0.2);
   clearWave(); h.step(0.05); // break before wave 2 (no bear)
+  h.tap('KeyN'); h.step(0.02); // skip the creek mission
   let warnedEarly = false;
   h.step(INTERMISSION.between + 0.2, () => { if (w.warning) warnedEarly = true; });
   check('no warning before a wave without the bear', !warnedEarly && w.wave === 1);
@@ -419,6 +421,109 @@ const north = () => WINDOWS.find(w => w.axis === 'x');
     Math.abs(d.phaseTime - INTERMISSION.first) < 0.01 && nw.rumbleTime === 0, JSON.stringify({ mid, wave: d.wave, warning: d.warning, warned: d.warned }));
 }
 
+// ---- the creek mission ----
+/** A run paused at the start of the creek cleanup (wave 1 cleared, banner gone). */
+function atCleanup() {
+  const h = headless();
+  h.game.start();
+  const w = h.game.world;
+  w.player.god = true;
+  h.step(INTERMISSION.first + 0.2);
+  w.toSpawn = 0; w.enemies = [];
+  h.step(3.2); // wave-cleared banner, then the ranger speaks
+  return { h, w };
+}
+const pickUp = (h, w, l) => { Object.assign(w.player, { x: l.x - 0.5, y: l.y }); h.tap('KeyE'); h.step(0.05); };
+{
+  check('litter sits on the banks, out of the water and walkable', LITTER.length === 3 &&
+    LITTER.every(l => !inCreek(l.x, l.y) && isWalkableTile(Math.floor(l.x), Math.floor(l.y))));
+  check('no litter shares E range with a wall gun or a window', LITTER.every(l =>
+    WALL_BUYS.every(b => Math.hypot(l.x - b.fx, l.y - b.fy) > MISSION.pickupRange + 1.1 + 0.3) &&
+    WINDOWS.every(win => Math.hypot(l.x - win.cx, l.y - win.cy) > MISSION.pickupRange + BARRICADE.repairRange)));
+
+  // Before the mission: litter is scenery and cannot be picked up.
+  const h0 = headless();
+  h0.game.start();
+  const w0 = h0.game.world;
+  w0.director = false;
+  pickUp(h0, w0, LITTER[0]);
+  check('litter cannot be collected before the mission', w0.mission.state === 'waiting' && w0.mission.collected.length === 0);
+
+  const { h, w } = atCleanup();
+  check('the mission starts in the break after wave 1', w.mission.state === 'cleanup' && w.wave === 0 && w.phase === 'intermission');
+  const held = w.phaseTime;
+  h.step(20);
+  check('the next-wave countdown holds during the mission (no spawns)', w.phaseTime === held && w.wave === 0 && w.enemies.length === 0 && w.toSpawn === 0);
+  check('the ranger message shows, then gets out of the way', w.mission.time > MISSION.rangerTime);
+
+  const points0 = w.points, earned0 = w.earned;
+  const startT = w.time;
+  pickUp(h, w, LITTER[0]);
+  check('E picks up one piece: progress 1/3', w.mission.collected.length === 1 && h.sounds.includes('pickup'));
+  pickUp(h, w, LITTER[0]);
+  check('the same piece cannot be collected twice', w.mission.collected.length === 1);
+  pickUp(h, w, LITTER[1]);
+  pickUp(h, w, LITTER[2]);
+  check('all three collected: one cleanup bonus, kept out of the combat score',
+    w.mission.collected.length === 3 && w.points === points0 + MISSION.cleanupBonus && w.earned === earned0 && w.mission.bonus === MISSION.cleanupBonus,
+    `points ${points0}->${w.points} earned ${earned0}->${w.earned}`);
+  check('collecting never bought a gun or repaired a window', w.purchases.length === 0 && w.repairs === 0 && w.player.owned.size === 1);
+  check('the explanation shows after the cleanup', w.mission.state === 'explain');
+  h.step(MISSION.explainTime + 0.1);
+  check('then the question opens', w.mission.state === 'quiz');
+
+  // The question is modal: no moving or shooting; 1 2 3 answer instead of switching guns.
+  const pos = { x: w.player.x, y: w.player.y }, hp = w.player.health;
+  h.hold('KeyW'); h.tap('Space'); h.step(0.5); h.hold('KeyW', false);
+  check('no moving or shooting while answering', w.player.x === pos.x && w.player.y === pos.y && !h.sounds.slice(-30).includes('pistol'));
+
+  const before = w.points;
+  h.tap('KeyA'); h.step(0.05);
+  check('answer A: explained, retry allowed, nothing lost', w.mission.state === 'quiz' && w.mission.feedback === 'A' && w.points === before && w.player.health === hp);
+  h.tap('Digit3'); h.step(0.05);
+  check('answer C (key 3): explained, retry allowed, nothing lost', w.mission.state === 'quiz' && w.mission.feedback === 'C' && w.points === before && w.player.weapon === 'pistol');
+  h.tap('KeyB'); h.step(0.05);
+  check('answer B is correct and pays the lesson bonus', w.mission.correct && w.mission.state === 'answered' && w.points === before + MISSION.lessonBonus && w.mission.bonus === MISSION.cleanupBonus + MISSION.lessonBonus);
+  h.tap('KeyB'); h.step(0.05);
+  check('the lesson bonus is paid only once', w.points === before + MISSION.lessonBonus && w.mission.answers.join('') === 'ACB');
+  h.step(0.4); h.tap('Enter'); h.step(0.05);
+  check('Enter finishes the mission', w.mission.state === 'done' && w.earned === earned0);
+  check('the whole activity fits in about a minute', w.time - startT < 60, `${(w.time - startT).toFixed(1)}s of play`);
+  const s0 = h.sounds.length;
+  h.step(held + 0.3);
+  check('the countdown resumes and wave 2 starts exactly once', w.wave === 1 && w.phase === 'active' && h.sounds.slice(s0).filter(s => s === 'wave').length === 1);
+  w.toSpawn = 0; w.enemies = [];
+  h.step(3.5);
+  check('the mission runs once per run', w.mission.state === 'done' && w.phase === 'intermission' && w.wave === 1);
+}
+{
+  // Skipping mid-cleanup: no bonus, countdown resumes, next wave starts on time.
+  const { h, w } = atCleanup();
+  pickUp(h, w, LITTER[0]);
+  const points = w.points, left = w.phaseTime;
+  h.tap('KeyN'); h.step(0.05);
+  check('N skips the mission', w.mission.state === 'skipped' && w.points === points && w.mission.bonus === 0);
+  h.step(left + 0.3);
+  check('after skipping, the next wave starts on time', w.wave === 1 && w.phase === 'active');
+}
+{
+  // Skipping from the question works too.
+  const { h, w } = atCleanup();
+  for (const l of LITTER) pickUp(h, w, l);
+  h.tap('Enter'); h.step(0.05);
+  check('Enter skips the explanation to the question', w.mission.state === 'quiz');
+  h.tap('KeyN'); h.step(0.05);
+  check('N skips from the question (cleanup bonus kept, no lesson bonus)', w.mission.state === 'skipped' && w.mission.bonus === MISSION.cleanupBonus && !w.mission.lessonRewarded);
+}
+{
+  // A new run starts with a fresh mission.
+  const { h, w } = atCleanup();
+  pickUp(h, w, LITTER[0]);
+  h.game.start();
+  const d = h.game.debug();
+  check('restarting resets the mission', h.game.world !== w && d.mission.state === 'waiting' && d.mission.collected.length === 0 && d.mission.bonus === 0 && !d.mission.correct);
+}
+
 // ---- full run with god mode: win, then the arcade handoff ----
 {
   const h = headless();
@@ -432,6 +537,7 @@ const north = () => WINDOWS.find(w => w.axis === 'x');
   h.step(400, () => {
     if (waveSeq.at(-1) !== w.wave) waveSeq.push(w.wave);
     if (h.game.mode === 'won' && wonAt < 0) wonAt = w.time;
+    if (h.game.mode === 'play' && h.game.debug().mission.active) { h.tap('KeyN'); return; } // combat run: skip the creek mission
     if (h.game.mode !== 'play') return;
     const p = w.player;
     if (w.bear) bearSeen = true;
