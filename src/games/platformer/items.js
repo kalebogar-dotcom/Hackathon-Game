@@ -1,7 +1,7 @@
-// PIXEL CHIC data. Local grid is 24 wide x 32 tall. Shapes: [x, y, w, h, colorKey]
-// or ['o', cx, cy, rx, ry, colorKey] for a rounded ellipse.
-// Keys: c1 (chosen color), c1d (darker), c1l (lighter), c2 (accent), c2d, h/hd/hl (hair, dark, light),
-// s/sd (skin, dark), or any palette name / '#hex'.
+// PIXEL CHIC data. Local grid: 24 wide x 32 tall (y can go to -4 for hats).
+// Shapes: [x, y, w, h, key] or ['o', cx, cy, rx, ry, key] (rounded).
+// Keys: c1 (chosen color), c1d/c1l (darker/lighter), c2 (accent), c2d, h/hd/hl (hair), s/sd (skin),
+// or any palette name / '#hex'.
 
 export const SKINS = [
   { name: 'PORCELAIN', c: '#fbe0c8' }, { name: 'FAIR', c: '#f0c39c' },
@@ -22,6 +22,7 @@ export const HAIR_COLORS = [
 
 export const CLOTH_COLORS = [
   'red', 'orange', 'yellow', 'green', 'teal', 'sky', 'blue', 'violet', 'cream', 'black', 'grey', 'maroon',
+  '#f28ab2', '#f7c6d9', 'brown',
 ];
 
 const FR = [[7, 1, 10, 1], [6, 2, 12, 2], [5, 4, 14, 1], [8, 2, 3, 1, 'hl'], [9, 1, 2, 1, 'hl']];
@@ -47,6 +48,12 @@ export const HAIR = [
       [8, 1, 2, 1, 'hl'], [14, 2, 1, 1, 'hl'], [3, 5, 1, 1, 'hl'], [20, 6, 1, 1, 'hl'], [11, 0, 2, 1, 'hl']] },
 ];
 
+const H = 'HALLOWEEN';
+const PK = '#f28ab2';
+const PINK2 = '#f7c6d9';
+const PINK3 = '#f7a8c8';
+const TAN = '#e8c39a';
+
 export const SLOT_ITEMS = {
   top: [
     { id: 'tee', name: 'TEE', collection: 'BASICS', c1: 'sky', c2: 'cream',
@@ -60,6 +67,10 @@ export const SLOT_ITEMS = {
     { id: 'blouse', name: 'BLOUSE', collection: 'OLD MONEY', c1: 'cream', c2: 'maroon',
       rects: [[8, 14, 8, 8, 'c1'], [6, 14, 2, 5, 'c1'], [16, 14, 2, 5, 'c1'], [11, 14, 2, 2, 'c2'],
         [10, 15, 1, 1, 'c2'], [13, 15, 1, 1, 'c2'], [8, 20, 8, 1, 'c1d']] },
+    { id: 'sailor', name: 'SAILOR TOP', collection: 'CUTE', c1: 'cream', c2: 'blue',
+      rects: [[8, 14, 8, 8, 'c1'], [6, 14, 2, 3, 'c1'], [16, 14, 2, 3, 'c1'], [8, 14, 8, 2, 'c2'], [11, 16, 2, 3, 'c2'], [8, 20, 8, 2, 'c1d']] },
+    { id: 'puffBlouse', name: 'PUFF BLOUSE', collection: 'CUTE', c1: PINK2, c2: 'cream',
+      rects: [[8, 14, 8, 8, 'c1'], [5, 14, 3, 4, 'c1'], [16, 14, 3, 4, 'c1'], [5, 17, 3, 1, 'c2'], [16, 17, 3, 1, 'c2'], [10, 14, 4, 1, 'c2'], [8, 20, 8, 2, 'c1d']] },
   ],
   bottom: [
     { id: 'jeans', name: 'JEANS', collection: 'BASICS', c1: 'blue', c2: 'cream',
@@ -70,6 +81,12 @@ export const SLOT_ITEMS = {
       rects: [[8, 22, 8, 1, 'c2'], [7, 23, 10, 2, 'c1'], [6, 25, 12, 2, 'c1'], [6, 26, 12, 1, 'c1d'], [6, 27, 12, 1, 'c2']] },
     { id: 'cargo', name: 'CARGO PANTS', collection: 'STREETWEAR', c1: 'grey', c2: 'black',
       rects: [[9, 22, 3, 8, 'c1'], [12, 22, 3, 8, 'c1'], [9, 22, 6, 1, 'c2'], [9, 25, 2, 2, 'c1d'], [13, 25, 2, 2, 'c1d'], [12, 23, 1, 7, 'c1d']] },
+    { id: 'tutu', name: 'TUTU', collection: 'CUTE', c1: PINK3, c2: 'cream',
+      rects: [[8, 22, 8, 1, 'c2'], [6, 23, 12, 2, 'c1'], [5, 25, 14, 2, 'c1'], [5, 27, 14, 1, 'c2']] },
+    { id: 'plaidSkirt', name: 'PLAID SKIRT', collection: 'CUTE', c1: 'red', c2: 'black',
+      rects: [[8, 22, 8, 1, 'c2'], [7, 23, 10, 2, 'c1'], [6, 25, 12, 2, 'c1'], [8, 23, 1, 4, 'c2'], [11, 23, 1, 4, 'c2'], [14, 23, 1, 4, 'c2'], [6, 26, 12, 1, 'c1d']] },
+    { id: 'flares', name: 'FLARE JEANS', collection: 'Y2K', c1: 'blue', c2: 'cream',
+      rects: [[8, 22, 4, 8, 'c1'], [12, 22, 4, 8, 'c1'], [7, 28, 5, 2, 'c1'], [12, 28, 5, 2, 'c1'], [8, 22, 8, 1, 'c2'], [12, 23, 1, 5, 'c1d']] },
   ],
   dress: [
     { id: 'sundress', name: 'SUNDRESS', collection: 'COQUETTE', c1: 'cream', c2: 'red',
@@ -78,6 +95,33 @@ export const SLOT_ITEMS = {
     { id: 'gown', name: 'BALL GOWN', collection: 'GLAMOUR', c1: 'violet', c2: 'yellow',
       rects: [[8, 14, 8, 6, 'c1'], [6, 14, 2, 2, 'c1'], [16, 14, 2, 2, 'c1'], [9, 14, 6, 1, 'c2'], [8, 19, 8, 1, 'c2'],
         [7, 20, 10, 3, 'c1'], [5, 23, 14, 4, 'c1'], [4, 27, 16, 3, 'c1'], [4, 29, 16, 1, 'c2']] },
+    { id: 'pinafore', name: 'PINAFORE', collection: 'CUTE', c1: 'blue', c2: 'cream',
+      rects: [[8, 15, 8, 4, 'c1'], [9, 14, 1, 1, 'c1'], [14, 14, 1, 1, 'c1'], [6, 14, 2, 3, 'c2'], [16, 14, 2, 3, 'c2'], [10, 14, 4, 1, 'c2'],
+        [7, 19, 10, 3, 'c1'], [6, 22, 12, 5, 'c1'], [6, 26, 12, 1, 'c2']] },
+    { id: 'lolita', name: 'SWEET LOLITA', collection: 'CUTE', c1: PINK3, c2: 'cream',
+      rects: [[8, 14, 8, 5, 'c1'], [6, 14, 2, 3, 'c2'], [16, 14, 2, 3, 'c2'], [8, 18, 8, 1, 'c2'], [11, 15, 2, 2, 'c2'],
+        [6, 19, 12, 4, 'c1'], [5, 23, 14, 3, 'c1'], [5, 25, 14, 1, 'c2'], [4, 26, 16, 1, 'c2']] },
+    { id: 'overalls', name: 'OVERALLS', collection: 'CUTE', c1: 'blue', c2: 'cream',
+      rects: [[8, 14, 8, 8, 'c2'], [6, 14, 2, 3, 'c2'], [16, 14, 2, 3, 'c2'], [9, 15, 6, 7, 'c1'], [9, 14, 1, 1, 'c1'], [14, 14, 1, 1, 'c1'],
+        [9, 22, 3, 7, 'c1'], [12, 22, 3, 7, 'c1'], [12, 23, 1, 6, 'c1d'], [11, 17, 2, 2, 'c2']] },
+    { id: 'nurseDress', name: 'NURSE DRESS', collection: H, c1: 'cream', c2: 'red',
+      rects: [[8, 14, 8, 5, 'c1'], [6, 14, 2, 3, 'c1'], [16, 14, 2, 3, 'c1'], [11, 15, 2, 3, 'c2'], [10, 16, 4, 1, 'c2'],
+        [8, 18, 8, 1, 'c2'], [7, 19, 10, 4, 'c1'], [6, 23, 12, 4, 'c1'], [6, 26, 12, 1, 'c1d']] },
+    { id: 'witchDress', name: 'WITCH DRESS', collection: H, c1: 'violet', c2: 'orange',
+      rects: [[8, 14, 8, 5, 'c1'], [6, 14, 2, 6, 'c1'], [16, 14, 2, 6, 'c1'], [8, 18, 8, 1, 'c2'], [7, 19, 10, 4, 'c1'],
+        [5, 23, 14, 4, 'c1'], [5, 28, 2, 2, 'c1'], [9, 28, 2, 1, 'c1'], [13, 28, 3, 2, 'c1'], [17, 28, 2, 1, 'c1'], [4, 27, 16, 1, 'c2']] },
+    { id: 'pumpkinDress', name: 'PUMPKIN DRESS', collection: H, c1: 'orange', c2: 'green',
+      rects: [[8, 14, 8, 6, 'c1'], [6, 14, 2, 3, 'c1'], [16, 14, 2, 3, 'c1'], ['o', 12, 24, 7, 5, 'c1'], [10, 20, 1, 8, 'c1d'], [14, 20, 1, 8, 'c1d'], [9, 14, 6, 1, 'c2']] },
+    { id: 'angelDress', name: 'ANGEL GOWN', collection: H, c1: 'cream', c2: 'yellow',
+      rects: [[8, 14, 8, 6, 'c1'], [6, 14, 2, 3, 'c1'], [16, 14, 2, 3, 'c1'], [8, 19, 8, 1, 'c2'], [7, 20, 10, 3, 'c1'],
+        [6, 23, 12, 4, 'c1'], [5, 27, 14, 3, 'c1'], [5, 29, 14, 1, 'c2']] },
+    { id: 'ghostBody', name: 'GHOST SHEET', collection: H, c1: 'cream', c2: 'grey',
+      rects: [[5, 14, 14, 10, 'c1'], [4, 24, 16, 5, 'c1'], [4, 28, 16, 1, 'c1d'], [4, 29, 3, 2, 'c1'], [8, 29, 3, 2, 'c1'], [13, 29, 3, 2, 'c1'], [17, 29, 3, 2, 'c1']] },
+    { id: 'wizardRobe', name: 'WIZARD ROBE', collection: H, c1: 'violet', c2: 'yellow',
+      rects: [[8, 14, 8, 8, 'c1'], [6, 14, 2, 7, 'c1'], [16, 14, 2, 7, 'c1'], [8, 19, 8, 1, 'c2'], [11, 15, 2, 2, 'c2'],
+        [7, 22, 10, 4, 'c1'], [6, 26, 12, 4, 'c1'], [6, 29, 12, 1, 'c2']] },
+    { id: 'fairyDress', name: 'FAIRY DRESS', collection: H, c1: 'teal', c2: PINK2,
+      rects: [[8, 14, 8, 5, 'c1'], [9, 14, 1, 1, 'c2'], [14, 14, 1, 1, 'c2'], [11, 16, 2, 1, 'c2'], [7, 19, 10, 3, 'c1'], [5, 22, 14, 2, 'c2'], [6, 24, 12, 2, 'c1']] },
   ],
   outer: [
     { id: 'jacket', name: 'JACKET', collection: 'STREETWEAR', c1: 'black', c2: 'grey',
@@ -86,6 +130,11 @@ export const SLOT_ITEMS = {
     { id: 'cardigan', name: 'CARDIGAN', collection: 'DARK ACADEMIA', c1: 'maroon', c2: 'yellow',
       rects: [[6, 14, 2, 7, 'c1'], [16, 14, 2, 7, 'c1'], [8, 14, 2, 8, 'c1'], [14, 14, 2, 8, 'c1'],
         [9, 16, 1, 1, 'c2'], [9, 18, 1, 1, 'c2'], [9, 20, 1, 1, 'c2'], [6, 20, 2, 1, 'c2'], [16, 20, 2, 1, 'c2']] },
+    { id: 'vampireCoat', name: 'VAMPIRE COAT', collection: H, c1: 'black', c2: 'red',
+      rects: [[6, 14, 2, 7, 'c1'], [16, 14, 2, 7, 'c1'], [8, 14, 2, 9, 'c1'], [14, 14, 2, 9, 'c1'],
+        [7, 13, 3, 2, 'c2'], [14, 13, 3, 2, 'c2'], [10, 14, 1, 8, 'c2'], [13, 14, 1, 8, 'c2']] },
+    { id: 'ribs', name: 'SKELETON BONES', collection: H, c1: 'cream', c2: 'grey',
+      rects: [[11, 14, 2, 8, 'c1'], [9, 15, 6, 1, 'c1'], [9, 17, 6, 1, 'c1'], [9, 19, 6, 1, 'c1'], [6, 14, 1, 7, 'c1'], [17, 14, 1, 7, 'c1']] },
   ],
   shoes: [
     { id: 'sneakers', name: 'SNEAKERS', collection: 'BASICS', c1: 'cream', c2: 'grey',
@@ -94,36 +143,34 @@ export const SLOT_ITEMS = {
       rects: [[8, 26, 4, 6, 'c1'], [12, 26, 4, 6, 'c1'], [8, 26, 4, 1, 'c2'], [12, 26, 4, 1, 'c2'], [8, 31, 4, 1, 'c2'], [12, 31, 4, 1, 'c2']] },
     { id: 'maryjanes', name: 'MARY JANES', collection: 'COQUETTE', c1: 'red', c2: 'cream',
       rects: [[8, 30, 4, 2, 'c1'], [12, 30, 4, 2, 'c1'], [8, 29, 4, 1, 'c2'], [12, 29, 4, 1, 'c2']] },
+    { id: 'platforms', name: 'PLATFORMS', collection: 'CUTE', c1: PINK3, c2: 'cream',
+      rects: [[8, 28, 4, 3, 'c1'], [12, 28, 4, 3, 'c1'], [8, 30, 4, 2, 'c2'], [12, 30, 4, 2, 'c2']] },
+    { id: 'kneeSocks', name: 'KNEE SOCKS', collection: 'CUTE', c1: 'red', c2: 'cream',
+      rects: [[9, 24, 3, 6, 'c2'], [12, 24, 3, 6, 'c2'], [9, 25, 3, 1, 'c1'], [12, 25, 3, 1, 'c1'], [9, 27, 3, 1, 'c1'], [12, 27, 3, 1, 'c1'],
+        [8, 29, 4, 3, 'black'], [12, 29, 4, 3, 'black']] },
   ],
-  acc: [
-    { id: 'bow', name: 'HAIR BOW', collection: 'COQUETTE', c1: 'red', c2: 'maroon',
-      rects: [[15, 2, 4, 3, 'c1'], [16, 3, 2, 1, 'c2']] },
-    { id: 'glasses', name: 'GLASSES', collection: 'BASICS', c1: 'black', c2: 'grey',
-      rects: [[6, 6, 5, 1, 'c1'], [6, 10, 5, 1, 'c1'], [6, 6, 1, 5, 'c1'], [10, 6, 1, 5, 'c1'],
-        [13, 6, 5, 1, 'c1'], [13, 10, 5, 1, 'c1'], [13, 6, 1, 5, 'c1'], [17, 6, 1, 5, 'c1'], [11, 8, 2, 1, 'c1']] },
-    { id: 'scarf', name: 'SCARF', collection: 'COZY', c1: 'red', c2: 'cream',
-      rects: [[8, 13, 8, 2, 'c1'], [8, 14, 8, 1, 'c1d'], [9, 15, 2, 5, 'c1'], [9, 17, 2, 1, 'c2']] },
-    { id: 'crown', name: 'CROWN', collection: 'GLAMOUR', c1: 'yellow', c2: 'orange',
-      rects: [[8, 1, 8, 2, 'c1'], [8, 0, 1, 1, 'c1'], [11, 0, 2, 1, 'c1'], [15, 0, 1, 1, 'c1'], [11, 2, 2, 1, 'c2']] },
-  ],
-};
-
-export const PRESETS = [
-  { name: 'COZY AUTUMN', items: { top: ['sweater', 'orange'], bottom: ['jeans', 'blue'], outer: ['cardigan', 'maroon'], shoes: ['boots', 'black'], acc: ['scarf', 'red'] } },
-  { name: 'STREET STAR', items: { top: ['hoodie', 'violet'], bottom: ['cargo', 'grey'], outer: ['jacket', 'black'], shoes: ['sneakers', 'cream'] } },
-  { name: 'SWEET DATE', items: { dress: ['sundress', 'cream'], shoes: ['maryjanes', 'red'], acc: ['bow', 'red'] } },
-  { name: 'GLAM NIGHT', items: { dress: ['gown', 'violet'], shoes: ['maryjanes', 'black'], acc: ['crown', 'yellow'] } },
-];
-
-export const DEFAULT_LOOKS = {
-  girl: {
-    skin: 2, eyes: 0, hair: 'longStraight', hairColor: 1,
-    top: { id: 'blouse', c: 'cream' }, bottom: { id: 'skirt', c: 'maroon' }, dress: null, outer: null,
-    shoes: { id: 'sneakers', c: 'sky' }, acc: { id: 'bow', c: 'red' },
-  },
-  boy: {
-    skin: 3, eyes: 0, hair: 'curlyTop', hairColor: 0,
-    top: { id: 'hoodie', c: 'teal' }, bottom: { id: 'jeans', c: 'blue' }, dress: null, outer: null,
-    shoes: { id: 'sneakers', c: 'cream' }, acc: null,
-  },
-};
+  hat: [
+    { id: 'bearEars', name: 'BEAR EARS', collection: 'CUTE', c1: 'brown', c2: TAN,
+      rects: [['o', 6.5, 1.5, 2.3, 2.3, 'c1'], ['o', 17.5, 1.5, 2.3, 2.3, 'c1'], ['o', 6.5, 1.7, 1, 1, 'c2'], ['o', 17.5, 1.7, 1, 1, 'c2']] },
+    { id: 'bunnyEars', name: 'BUNNY EARS', collection: 'CUTE', c1: 'cream', c2: PK,
+      rects: [[7, -4, 2, 5, 'c1'], [15, -4, 2, 5, 'c1'], [8, -3, 1, 3, 'c2'], [15, -3, 1, 3, 'c2']] },
+    { id: 'beret', name: 'BERET', collection: 'CUTE', c1: 'maroon', c2: 'red',
+      rects: [['o', 12, 1, 8, 2.6, 'c1'], [12, -2, 1, 1, 'c1'], [5, 1, 14, 1, 'c1d']] },
+    { id: 'witchHat', name: 'WITCH HAT', collection: H, c1: 'black', c2: 'orange',
+      rects: [[3, 1, 18, 2, 'c1'], [8, -1, 8, 2, 'c1'], [10, -3, 4, 2, 'c1'], [11, -4, 3, 1, 'c1'], [8, 0, 8, 1, 'c2'], [11, 0, 2, 1, 'yellow']] },
+    { id: 'nurseCap', name: 'NURSE CAP', collection: H, c1: 'cream', c2: 'red',
+      rects: [[7, 0, 10, 3, 'c1'], [6, 2, 12, 1, 'c1d'], [11, 0, 2, 3, 'c2'], [10, 1, 4, 1, 'c2']] },
+    { id: 'pumpkinHat', name: 'PUMPKIN HAT', collection: H, c1: 'orange', c2: 'green',
+      rects: [['o', 12, 1.5, 5.5, 2.5, 'c1'], [10, 0, 1, 3, 'c1d'], [13, 0, 1, 3, 'c1d'], [11, -3, 2, 2, 'c2'], [13, -3, 2, 1, 'c2']] },
+    { id: 'catEars', name: 'CAT EARS', collection: H, c1: 'black', c2: PK,
+      rects: [[6, -1, 3, 3, 'c1'], [7, -2, 1, 1, 'c1'], [15, -1, 3, 3, 'c1'], [16, -2, 1, 1, 'c1'], [7, 0, 1, 2, 'c2'], [16, 0, 1, 2, 'c2']] },
+    { id: 'halo', name: 'HALO', collection: H, c1: 'yellow', c2: 'orange',
+      rects: [[8, -3, 8, 1, 'c1'], [7, -2, 1, 1, 'c1'], [16, -2, 1, 1, 'c1'], [8, -1, 8, 1, 'c1']] },
+    { id: 'devilHorns', name: 'DEVIL HORNS', collection: H, c1: 'red', c2: 'maroon',
+      rects: [[6, -1, 2, 3, 'c1'], [5, -2, 1, 1, 'c1'], [16, -1, 2, 3, 'c1'], [18, -2, 1, 1, 'c1']] },
+    { id: 'wizardHat', name: 'WIZARD HAT', collection: H, c1: 'violet', c2: 'yellow',
+      rects: [[4, 1, 16, 2, 'c1'], [8, -1, 8, 2, 'c1'], [9, -3, 6, 2, 'c1'], [11, -4, 3, 1, 'c1'], [8, 0, 8, 1, 'c2'], [11, -2, 2, 1, 'yellow']] },
+    { id: 'pirateHat', name: 'PIRATE HAT', collection: H, c1: 'black', c2: 'cream',
+      rects: [[5, -1, 14, 3, 'c1'], [3, 1, 18, 1, 'c1'], [11, 0, 2, 1, 'c2'], [10, 1, 1, 1, 'c2'], [13, 1, 1, 1, 'c2']] },
+    { id: 'wolfEars', name: 'WOLF EARS', collection: H, c1: 'brown', c2: TAN,
+      rects: [[5, -1, 4, 4, 'c1'], [6, -2, 2,
