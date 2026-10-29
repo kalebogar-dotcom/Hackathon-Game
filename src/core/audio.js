@@ -35,6 +35,7 @@ const SOUNDS = {
   bearDie: [{ type: 'sawtooth', f: [120, 30], d: 1.2, v: 0.25 }, { type: 'noise', f: [1200, 60], d: 1.0, v: 0.3 }],
   board: [note(230, 0, 0.05, 'square', 0.13), { type: 'noise', f: [2600, 700], d: 0.06, v: 0.2 }, note(270, 0.11, 0.05, 'square', 0.12), { type: 'noise', f: [2600, 700], d: 0.06, v: 0.18, t: 0.11 }],
   boardBreak: [{ type: 'noise', f: [3800, 200], d: 0.22, v: 0.32 }, { type: 'square', f: [320, 90], d: 0.12, v: 0.1 }],
+  pickup: [note(784, 0, 0.05, 'triangle', 0.14), note(1175, 0.05, 0.09, 'triangle', 0.14)],
   bearStep: [{ type: 'sine', f: [72, 36], d: 0.34, v: 0.42 }, { type: 'noise', f: [240, 40], d: 0.24, v: 0.26 }],
   bearCall: [
     { type: 'sawtooth', f: [170, 120], d: 0.35, v: 0.18 },

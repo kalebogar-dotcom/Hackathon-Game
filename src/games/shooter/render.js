@@ -1,6 +1,7 @@
 // Drawing: raycast walls, billboard sprites, the held gun, the HUD and the menu screens.
-import { W, H, PAL, DARKER, FOV_SCALE, PLAYER, WEAPONS, WEAPON_ORDER, WAVES, INTERMISSION } from './config.js';
-import { tileAt, isWallTile, TREES, insideCabin } from './world.js';
+import { W, H, PAL, DARKER, FOV_SCALE, PLAYER, WEAPONS, WEAPON_ORDER, WAVES, INTERMISSION, MISSION } from './config.js';
+import { tileAt, isWallTile, TREES, insideCabin, inCreek, LITTER } from './world.js';
+import { MISSION_TEXT } from './mission-text.js';
 
 // The pixel font comes from the arcade (api.text); createGame hands it over before the first draw.
 let drawText = () => {};
@@ -52,6 +53,33 @@ function drawBackdrop(g, art, angle, indoors) {
   }
   const floor = [[HORIZON, PAL.black], [rowAt(FOG[2]), PAL.night], [rowAt(FOG[1]), PAL.bark], [rowAt(FOG[0]), PAL.bloodDark]];
   floor.forEach(([y, c], i) => { g.fillStyle = c; g.fillRect(0, y, W, (floor[i + 1]?.[0] ?? H) - y); });
+}
+
+/**
+ * The creek, cast onto the floor row by row (walls drawn afterwards cover anything behind them).
+ * Moonlit water in the game's palette, with a few drifting ripple pixels.
+ */
+function drawCreek(g, cam, clock) {
+  const lx = cam.dirX - cam.planeX, ly = cam.dirY - cam.planeY; // ray through the left screen edge
+  const rx = cam.dirX + cam.planeX, ry = cam.dirY + cam.planeY; // ...and the right edge
+  for (let y = Math.floor(HORIZON) + 1; y < H; y++) {
+    const rowDist = H / (2 * (y - HORIZON));
+    if (rowDist > FOG[2] + 2) continue;
+    const fog = fogLevel(rowDist);
+    const sx = (rowDist * (rx - lx)) / W, sy = (rowDist * (ry - ly)) / W;
+    let wx = cam.x + rowDist * lx, wy = cam.y + rowDist * ly, start = -1;
+    g.fillStyle = shade(PAL.fog, fog);
+    for (let col = 0; col <= W; col++, wx += sx, wy += sy) {
+      const wet = col < W && inCreek(wx, wy);
+      if (wet && start < 0) start = col;
+      if (!wet && start >= 0) { g.fillRect(start, y, col - start, 1); start = -1; }
+      if (wet && fog < 2 && (Math.floor(wx * 7) + Math.floor(wy * 2.5 - clock * 1.5)) % 9 === 0) {
+        g.fillStyle = shade(PAL.bone, fog + 1);
+        g.fillRect(col, y, 1, 1);
+        g.fillStyle = shade(PAL.fog, fog);
+      }
+    }
+  }
 }
 
 function drawWalls(g, art, cam) {
@@ -162,6 +190,18 @@ function drawEnemy(g, art, cam, e, clock) {
   }
 }
 
+const LITTER_SIZE = { bottle: 0.2, wrapper: 0.1, can: 0.15 };
+
+/** A piece of litter on the bank; during the cleanup a bobbing gold marker floats above it. */
+function drawLitter(g, art, cam, s, marked, clock) {
+  const r = drawBillboard(g, art.litter[s.ref.id][fogLevel(s._depth)], cam, s.x, s.y, LITTER_SIZE[s.ref.id]);
+  if (!r || !marked) return;
+  const col = Math.round(r.screenX);
+  if (col < 0 || col >= W || zbuf[col] <= r.depth) return;
+  const lift = Math.max(6, H / r.depth * 0.25) + Math.round(Math.sin(clock * 5) * 2);
+  drawText(g, 'V', r.screenX, r.top - lift, PAL.gold, { align: 'center', shadow: PAL.black });
+}
+
 function drawParticles(g, cam, particles) {
   for (const q of particles) {
     const { screenX, depth } = project(cam, q.x, q.y);
@@ -225,8 +265,10 @@ function drawHud(g, world, o) {
     bar(g, W / 2 - 60, 12, 120, 4, bear.hp / bear.maxHp, PAL.red);
   }
 
-  // Break between waves: the next wave's number, a countdown and a draining bar.
-  if (world.phase === 'intermission' && world.wave >= 0) {
+  // Break between waves: the next wave's number, a countdown and a draining bar (held while the creek mission runs).
+  const m = world.mission;
+  const missionUp = ['cleanup', 'explain', 'quiz', 'answered'].includes(m.state);
+  if (world.phase === 'intermission' && world.wave >= 0 && !missionUp && m.state !== 'pending') {
     const secs = Math.ceil(world.phaseTime);
     panel(g, W / 2 - 64, 2, 128, 17);
     drawText(g, `WAVE ${world.wave + 2} IN ${secs}`, W / 2, 5, secs <= 3 ? PAL.gold : PAL.bone, { align: 'center' });
@@ -257,6 +299,14 @@ function drawHud(g, world, o) {
     drawText(g, line2, W / 2, 136, c2, { align: 'center' });
   }
 
+  if (o.litter) {
+    panel(g, W / 2 - 70, 124, 140, 20);
+    drawText(g, o.litter, W / 2, 128, PAL.bone, { align: 'center' });
+    drawText(g, 'PRESS E TO PICK UP', W / 2, 136, PAL.gold, { align: 'center' });
+  }
+
+  if (missionUp) drawMission(g, world, o);
+
   if (o.repair) {
     const { boards, max, progress, blocked, capped } = o.repair;
     const full = boards >= max;
@@ -277,13 +327,83 @@ function drawHud(g, world, o) {
     drawText(g, 'SOMETHING IS IN THE WOODS...', W / 2, 68, PAL.red, { scale: 2, align: 'center', shadow: PAL.black });
   }
 
-  if (o.live && !o.locked) drawText(g, 'CLICK TO AIM WITH THE MOUSE', W / 2, 24, PAL.fog, { align: 'center', shadow: PAL.black });
+  if (o.live && !o.locked && !missionUp) drawText(g, 'CLICK TO AIM WITH THE MOUSE', W / 2, 24, PAL.fog, { align: 'center', shadow: PAL.black });
 
   const pain = p.hurtFlash / 0.35;
   const edge = pain > 0 ? Math.ceil(pain * 8) : low ? 2 : 0;
   if (edge) {
     g.fillStyle = pain > 0 ? PAL.blood : PAL.bloodDark;
     g.fillRect(0, 0, W, edge); g.fillRect(0, H - edge, W, edge); g.fillRect(0, 0, edge, H); g.fillRect(W - edge, 0, edge, H);
+  }
+}
+
+// ---------- the creek mission ----------
+
+const QUIZ = { x: 10, y: 36, w: 300, h: 100 };
+
+/** Click targets for the three answers (shared with the game's input handling). */
+export function quizOptionRects() {
+  return ['A', 'B', 'C'].map((id, i) => ({ id, x: QUIZ.x + 4, y: QUIZ.y + 15 + i * 11, w: QUIZ.w - 8, h: 10 }));
+}
+
+function wrap(text, max) {
+  const lines = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    if (line && (line + ' ' + word).length > max) { lines.push(line); line = word; } else line = line ? `${line} ${word}` : word;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function drawMission(g, world, o) {
+  const m = world.mission;
+  const T = MISSION_TEXT;
+  // Objective panel where the countdown usually is (the countdown is held until the mission ends).
+  panel(g, W / 2 - 75, 2, 150, 25);
+  drawText(g, T.title, W / 2, 5, PAL.gold, { align: 'center' });
+  drawText(g, `CREEK CLEANUP: ${m.collected.length}/${LITTER.length}`, W / 2, 12, m.collected.length === LITTER.length ? PAL.moss : PAL.bone, { align: 'center' });
+  drawText(g, T.skip, W / 2, 19, PAL.fog, { align: 'center' });
+
+  if (m.state === 'cleanup' && m.time < MISSION.rangerTime) {
+    panel(g, 10, 32, 300, 27);
+    drawText(g, 'RANGER', 14, 35, PAL.gold);
+    drawText(g, T.factLabel, W - 14, 35, PAL.moss, { align: 'right' });
+    T.ranger.forEach((line, i) => drawText(g, line, W / 2, 44 + i * 7, PAL.bone, { align: 'center' }));
+  }
+
+  if (m.state === 'explain') {
+    panel(g, 10, 32, 300, 35);
+    drawText(g, 'CREEK CLEAN!', 14, 35, PAL.gold);
+    drawText(g, T.factLabel, W - 14, 35, PAL.moss, { align: 'right' });
+    T.explain.forEach((line, i) => drawText(g, line, W / 2, 44 + i * 7, PAL.bone, { align: 'center' }));
+    drawText(g, `+${MISSION.cleanupBonus} PTS CLEANUP BONUS`, 14, 59, PAL.gold);
+    drawText(g, 'ENTER: NEXT', W - 14, 59, PAL.fog, { align: 'right' });
+  }
+
+  if (m.state === 'quiz' || m.state === 'answered') {
+    g.fillStyle = PAL.black;
+    g.fillRect(QUIZ.x - 1, QUIZ.y - 1, QUIZ.w + 2, QUIZ.h + 2);
+    g.fillStyle = PAL.gold;
+    g.fillRect(QUIZ.x - 1, QUIZ.y - 1, QUIZ.w + 2, 1);
+    g.fillStyle = PAL.night;
+    g.fillRect(QUIZ.x, QUIZ.y, QUIZ.w, QUIZ.h);
+    drawText(g, T.question, W / 2, QUIZ.y + 4, PAL.gold, { align: 'center' });
+    for (const r of quizOptionRects()) {
+      const picked = m.answers.includes(r.id);
+      const right = picked && r.id === 'B' && m.correct;
+      if (m.feedback === r.id) { g.fillStyle = PAL.dusk; g.fillRect(r.x, r.y, r.w, r.h); }
+      drawText(g, `${r.id}  ${T.options[r.id]}`, r.x + 3, r.y + 3, right ? PAL.moss : picked ? PAL.red : PAL.bone);
+    }
+    if (m.feedback) {
+      const ok = m.feedback === 'B';
+      wrap(T.feedback[m.feedback], 72).forEach((line, i) => drawText(g, line, W / 2, QUIZ.y + 56 + i * 8, ok ? PAL.moss : PAL.ember, { align: 'center' }));
+    }
+    const footer = m.state === 'answered'
+      ? `${m.lessonRewarded ? `+${MISSION.lessonBonus} PTS  -  ` : ''}PRESS ENTER TO CONTINUE`
+      : 'PRESS A, B OR C (OR 1 2 3, OR CLICK)';
+    drawText(g, footer, W / 2, QUIZ.y + 78, m.state === 'answered' ? PAL.gold : PAL.fog, { align: 'center' });
+    drawText(g, T.skip, W / 2, QUIZ.y + 89, PAL.fog, { align: 'center' });
   }
 }
 
@@ -296,16 +416,20 @@ export function drawFrame(g, art, world, o) {
   if (amp) g.translate(Math.round(Math.random() * 2 * amp - amp), Math.round(Math.random() * 2 * amp - amp));
   const cam = makeCamera(p.x, p.y, p.angle);
   drawBackdrop(g, art, p.angle, insideCabin(p.x, p.y));
+  drawCreek(g, cam, o.clock);
   drawWalls(g, art, cam);
+  const cleanup = world.mission.state === 'cleanup';
   const sprites = TREES.map(t => ({ kind: 'tree', x: t.x, y: t.y }))
     .concat(world.enemies)
-    .concat(world.barricades.filter(b => b.boards > 0).map(b => ({ kind: 'barricade', ref: b, x: b.cx, y: b.cy })));
+    .concat(world.barricades.filter(b => b.boards > 0).map(b => ({ kind: 'barricade', ref: b, x: b.cx, y: b.cy })))
+    .concat(LITTER.filter(l => !world.mission.collected.includes(l.id)).map(l => ({ kind: 'litter', ref: l, x: l.x, y: l.y })));
   for (const s of sprites) s._depth = project(cam, s.x, s.y).depth;
   sprites.sort((a, b) => b._depth - a._depth);
   for (const s of sprites) {
     if (s.kind === 'barricade') { drawBarricade(g, cam, s.ref); continue; } // clips itself at the near plane
     if (s._depth <= 0.15) continue;
     if (s.kind === 'tree') drawBillboard(g, art.tree[fogLevel(s._depth)], cam, s.x, s.y, 1.9);
+    else if (s.kind === 'litter') drawLitter(g, art, cam, s, cleanup, o.clock);
     else drawEnemy(g, art, cam, s, o.clock);
   }
   drawParticles(g, cam, world.particles);

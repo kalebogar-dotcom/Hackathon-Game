@@ -2,10 +2,10 @@
 // Gameplay: title screen, player, weapons, wall buys, zombies, the bear and the wave director.
 // Everything shared comes in through the arcade `api`; pause, mute and Play Again belong to the arcade.
 import {
-  PLAYER, WEAPONS, WEAPON_ORDER, BUY_RANGE, SCORE, ZOMBIE, BEAR, WAVES, MAX_ALIVE, INTERMISSION, BARRICADE, BEAR_WARNING,
+  PLAYER, WEAPONS, WEAPON_ORDER, BUY_RANGE, SCORE, ZOMBIE, BEAR, WAVES, MAX_ALIVE, INTERMISSION, BARRICADE, BEAR_WARNING, MISSION,
 } from './config.js';
-import { findTiles, WALL_BUYS, WINDOWS, moveCircle, castRay, trunkHit, segmentClear, createNav, setBoardedCheck } from './world.js';
-import { useText, drawFrame, drawTitle, drawEnd } from './render.js';
+import { findTiles, WALL_BUYS, WINDOWS, LITTER, moveCircle, castRay, trunkHit, segmentClear, createNav, setBoardedCheck } from './world.js';
+import { useText, drawFrame, drawTitle, drawEnd, quizOptionRects } from './render.js';
 import { buildArt } from './sprites.js';
 
 const START = findTiles('P')[0];
@@ -60,6 +60,31 @@ export function findRepairNear(world) {
   for (const b of world.barricades) {
     const d = Math.hypot(p.x - b.cx, p.y - b.cy);
     if (d <= bestD) { best = b; bestD = d; }
+  }
+  return best;
+}
+
+// ---------- the creek mission ----------
+
+// waiting -> pending (wave-cleared banner) -> cleanup -> explain -> quiz -> answered -> done; N skips from any active state.
+const MISSION_ACTIVE = new Set(['pending', 'cleanup', 'explain', 'quiz', 'answered']);
+export const QUIZ_ANSWERS = Object.freeze({ A: false, B: true, C: false }); // B: covered bin away from the creek
+
+export function newMission() {
+  return { state: 'waiting', time: 0, collected: [], cleanupRewarded: false, answers: [], feedback: null, correct: false, lessonRewarded: false, bonus: 0 };
+}
+export const missionActive = world => MISSION_ACTIVE.has(world.mission.state);
+const missionModal = world => world.mission.state === 'quiz' || world.mission.state === 'answered';
+
+/** The nearest uncollected piece of litter in pickup range, only while the cleanup is on. */
+export function findLitterNear(world) {
+  if (world.mission.state !== 'cleanup') return null;
+  const p = world.player;
+  let best = null, bestD = MISSION.pickupRange;
+  for (const l of LITTER) {
+    if (world.mission.collected.includes(l.id)) continue;
+    const d = Math.hypot(p.x - l.x, p.y - l.y);
+    if (d <= bestD) { best = l; bestD = d; }
   }
   return best;
 }
@@ -319,6 +344,7 @@ export function createGame(api) {
       barricades: WINDOWS.map((win, i) => ({ ...win, id: i, boards: BARRICADE.boards, rewarded: 0 })),
       repair: { target: null, progress: 0 }, repairs: 0, boardsTorn: 0,
       warning: null, warned: new Set(),
+      mission: newMission(),
       nav: createNav(), audio,
       hurtPlayer, knockPlayer, burst,
       shake: t => { w.shakeTime = Math.max(w.shakeTime, t); },
@@ -396,6 +422,8 @@ export function createGame(api) {
 
   function updateWaves(dt) {
     if (world.phase === 'intermission') {
+      // The creek mission holds the countdown (and the bear warning) until it is finished or skipped.
+      if (missionActive(world)) return;
       // Preparation break: no spawns. Runs on game time, so the arcade's pause freezes it.
       const before = world.phaseTime;
       world.phaseTime -= dt;
@@ -434,6 +462,85 @@ export function createGame(api) {
       world.phaseTime = INTERMISSION.between;
       world.banner = { text: `WAVE ${world.wave + 1} CLEARED`, sub: 'BUY GUNS - REPAIR THE WINDOWS', time: 3 };
       audio.play('clear');
+      if (world.wave === MISSION.afterWave && world.mission.state === 'waiting') setMission('pending');
+    }
+  }
+
+  // ----- creek mission -----
+
+  function setMission(state) {
+    world.mission.state = state;
+    world.mission.time = 0;
+  }
+
+  function collectLitter(l) {
+    const m = world.mission;
+    if (m.collected.includes(l.id)) return;
+    m.collected.push(l.id);
+    audio.play('pickup');
+    burst(l.x, l.y, 0.1, ['#efe3c2', '#f2c94c'], 6, 0.8);
+    if (m.collected.length < LITTER.length) return;
+    if (!m.cleanupRewarded) {
+      m.cleanupRewarded = true;
+      m.bonus += MISSION.cleanupBonus;
+      world.points += MISSION.cleanupBonus; // spendable, but kept out of the combat score (world.earned)
+    }
+    audio.play('clear');
+    setMission('explain');
+  }
+
+  function quizPick() {
+    if (input.wasPressed('KeyA', 'Digit1')) return 'A';
+    if (input.wasPressed('KeyB', 'Digit2')) return 'B';
+    if (input.wasPressed('KeyC', 'Digit3')) return 'C';
+    const m = input.mouse;
+    if (m.pressed && !input.pointerLocked) {
+      const hit = quizOptionRects().find(r => m.x >= r.x && m.x < r.x + r.w && m.y >= r.y && m.y < r.y + r.h);
+      if (hit) return hit.id;
+    }
+    return null;
+  }
+
+  function answerQuiz(choice) {
+    const m = world.mission;
+    m.answers.push(choice);
+    m.feedback = choice;
+    if (!QUIZ_ANSWERS[choice]) { audio.play('deny'); return; } // wrong: explain and let them retry, nothing lost
+    m.correct = true;
+    if (!m.lessonRewarded) {
+      m.lessonRewarded = true;
+      m.bonus += MISSION.lessonBonus;
+      world.points += MISSION.lessonBonus;
+    }
+    audio.play('buy');
+    setMission('answered');
+  }
+
+  function endMission(state, text) {
+    setMission(state);
+    world.banner = { text, sub: 'NEXT WAVE COUNTDOWN RESUMED', time: 2.5 };
+  }
+
+  function updateMission(dt) {
+    const m = world.mission;
+    if (!MISSION_ACTIVE.has(m.state)) return;
+    m.time += dt;
+    if (input.wasPressed('KeyN')) { endMission('skipped', 'MISSION SKIPPED'); audio.play('blip'); return; }
+    switch (m.state) {
+      case 'pending': // wait for the wave-cleared banner, then the ranger speaks
+        if (world.banner.time <= 0) { setMission('cleanup'); audio.play('talk'); }
+        break;
+      case 'explain':
+        if (m.time >= MISSION.explainTime || input.wasPressed('Enter')) { setMission('quiz'); input.unlockPointer(); }
+        break;
+      case 'quiz': {
+        const pick = quizPick();
+        if (pick) answerQuiz(pick);
+        break;
+      }
+      case 'answered':
+        if (m.time > 0.3 && (input.wasPressed('Enter', 'Space') || input.mouse.pressed)) endMission('done', 'CREEK PROTECTED');
+        break;
     }
   }
 
@@ -530,15 +637,17 @@ export function createGame(api) {
       audio.play('equip');
     }
 
-    // E: a wall gun in range always wins; otherwise a fresh press starts repairing the nearest window.
+    // E does one thing per press, in priority order: wall gun, then litter, then (held) window repair.
     const buy = findBuyNear(p);
+    const litter = buy ? null : findLitterNear(world);
     if (buy && input.wasPressed('KeyE')) {
       const r = tryBuy(world, buy);
       if (r.reason === 'bought') { audio.play('buy'); world.purchases.push(buy.weapon); }
       else if (r.reason === 'equipped') audio.play('equip');
       else if (!r.ok) { audio.play('deny'); world.denyTime = 0.6; }
     }
-    updateRepair(buy ? null : findRepairNear(world), dt);
+    if (litter && input.wasPressed('KeyE')) collectLitter(litter);
+    updateRepair(buy || litter ? null : findRepairNear(world), dt);
 
     const w = WEAPONS[p.weapon];
     const mouseFire = input.pointerLocked && (w.auto ? input.mouse.down : input.mouse.pressed);
@@ -581,16 +690,18 @@ export function createGame(api) {
   }
 
   function updatePlay(dt) {
-    if (input.mouse.pressed && !input.pointerLocked) input.lockPointer(); // this click never fires: aiming needs the lock
+    const modal = missionModal(world); // the creek question: no moving or shooting, the mouse is free to click answers
+    if (!modal && input.mouse.pressed && !input.pointerLocked) input.lockPointer(); // this click never fires: aiming needs the lock
     setBoardedCheck(world.boardedCheck); // collision always uses this run's barricades
     world.time += dt;
-    updatePlayer(dt);
+    if (!modal) updatePlayer(dt);
     if (mode !== 'play') return;
     world.nav.update(world.player.x, world.player.y);
     for (const e of world.enemies) (e.kind === 'bear' ? updateBear : updateZombie)(e, world, dt);
     if (mode !== 'play') return;
     separate(world.enemies);
     if (world.director) updateWaves(dt);
+    updateMission(dt);
     updateWarning(dt);
     updateParticles(dt);
     world.banner.time -= dt;
@@ -629,7 +740,8 @@ export function createGame(api) {
     g.imageSmoothingEnabled = false;
     if (mode === 'title') { drawTitle(g, art, clock, api.best); return; }
     const buy = mode === 'play' && findBuyNear(world.player);
-    const fix = mode === 'play' && !buy && findRepairNear(world);
+    const litter = mode === 'play' && !buy && findLitterNear(world);
+    const fix = mode === 'play' && !buy && !litter && findRepairNear(world);
     drawFrame(g, art, world, {
       clock, locked: input.pointerLocked, live: mode === 'play', remaining: remaining(),
       buy: buy && { weapon: WEAPONS[buy.weapon], owned: world.player.owned.has(buy.weapon), equipped: world.player.weapon === buy.weapon, affordable: world.points >= WEAPONS[buy.weapon].price, denied: world.denyTime > 0 },
@@ -638,6 +750,7 @@ export function createGame(api) {
         progress: world.repair.target === fix ? world.repair.progress : 0,
         capped: fix.rewarded >= BARRICADE.rewardCapPerWave,
       },
+      litter: litter && litter.name,
     });
     if (mode === 'won' || mode === 'lost') drawEnd(g, world, mode === 'won', modeTime);
   }
@@ -656,6 +769,7 @@ export function createGame(api) {
       barricades: world.barricades.map(b => ({ x: b.x, y: b.y, boards: b.boards, rewarded: b.rewarded })),
       repairs: world.repairs, boardsTorn: world.boardsTorn,
       warning: world.warning && { t: world.warning.t }, warned: [...world.warned],
+      mission: { ...world.mission, collected: [...world.mission.collected], answers: [...world.mission.answers], active: missionActive(world) },
     };
   }
 

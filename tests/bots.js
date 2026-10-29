@@ -21,6 +21,7 @@ export function bearHunter() {
     if (!s) return;
     if (s.mode === 'title') { ctl.tap('Enter'); return; }
     if (s.mode !== 'play') return;
+    if (s.mission?.active) { ctl.tap('KeyN'); return; } // a combat bot: skip the creek mission
     const p = s.player;
     if (s.bear?.state === 'windup' && t > dodgeUntil) { dodgeUntil = t + 0.8; dodgeKey = dodgeKey === 'KeyA' ? 'KeyD' : 'KeyA'; }
     if (t < dodgeUntil) ctl.hold(dodgeKey, true);

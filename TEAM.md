@@ -235,3 +235,21 @@ and is what the automated playtests read. It must not change state.
     attempt 2; return to hub and all-three progress then passed. The page was often throttled by the OS
     (window not in front), so parts were driven by stepping frames manually or with a timer-driven loop.
   - Still needs a human: listening to the new sounds (footsteps, roar, hammer, board crack).
+- **Bear: "Protect the Creek" learning mission** (branch `bear-creek-mission`, based on
+  `bear-barricades-breaks-warning`; not pushed):
+  - Creek floor-cast east of the cabin (walkable; navigation unchanged), 3 litter billboards, mission in the
+    break after wave 1 that holds the countdown; E priority gun > litter > window repair; cleanup bonus 100 and
+    lesson bonus 50 are spendable points tracked in `mission.bonus`, never in the combat score. Text in
+    `mission-text.js`, tuning in `config.js` `MISSION`. Facts checked against EPA Trash Free Waters (README).
+  - `npm test`: headless 10 / 10 and all Bear checks, including mission checks (litter placement out of gun and
+    window E range, no pickup before the mission, countdown held with no spawns, one-time bonuses kept out of
+    the combat score, no buy/repair while collecting, answers A/C retry with nothing lost, B rewarded once,
+    no moving or shooting while answering, Enter finishes, N skips from cleanup and from the question,
+    next wave starts once, mission once per run, restart reset). Existing combat tests and the key-only bot
+    skip the mission with N.
+  - Browser (real page, keys only): bot cleared wave 1, then the mission was played by steering with the arrow
+    keys and W to each item and pressing E; pause froze mission and countdown; A by key, C by mouse click,
+    B by key 2; Enter resumed the countdown and wave 2 started once; Restart and Return to Arcade mid-mission
+    left no sounds and a fresh mission; N skip worked in the page. Browser suite **25 / 25** with no user input
+    (frames were driven by a 16 ms timer because the OS throttled the window). One layout bug found and fixed:
+    the CLICK TO AIM hint overlapped the mission panel.

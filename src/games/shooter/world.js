@@ -64,6 +64,17 @@ function mount(ch, weapon, face) {
 // Each wall gun: the tile it hangs on, the face it shows on, and (fx, fy) the middle of that face.
 export const WALL_BUYS = Object.freeze([mount('1', 'shotgun', 'S'), mount('2', 'smg', 'S')]);
 
+// The creek east of the cabin: a shallow stream drawn on the ground. It does not block movement or paths.
+export const CREEK = Object.freeze({ y0: 1, y1: 18, halfWidth: 0.42, centerX: y => 18.5 + 0.3 * Math.sin(y * 0.85) });
+export const inCreek = (x, y) => y >= CREEK.y0 && y <= CREEK.y1 && Math.abs(x - CREEK.centerX(y)) <= CREEK.halfWidth;
+
+// Ordinary litter on the creek banks, collected during the creek mission.
+export const LITTER = Object.freeze([
+  Object.freeze({ id: 'bottle', name: 'PLASTIC BOTTLE', x: 17.55, y: 3.4 }),
+  Object.freeze({ id: 'wrapper', name: 'SNACK WRAPPER', x: 19.6, y: 5.6 }),
+  Object.freeze({ id: 'can', name: 'SODA CAN', x: 17.7, y: 9.6 }),
+]);
+
 // Each window: its tile, center, and axis — 'x' when it sits in an east-west wall (boards run along x).
 export const WINDOWS = Object.freeze(findTiles('B').map(t => Object.freeze({
   x: t.x, y: t.y, cx: t.x + 0.5, cy: t.y + 0.5,

@@ -274,6 +274,27 @@ function titleArt(rand) {
   return g;
 }
 
+// Ordinary litter for the creek mission: a plastic bottle, a snack wrapper and a soda can.
+function litterArt(kind) {
+  if (kind === 'bottle') {
+    const g = new Grid(5, 11);
+    g.rect(2, 0, 1, 1, PAL.red); g.rect(1, 1, 3, 1, PAL.red);
+    g.rect(1, 2, 3, 1, PAL.fog); g.rect(0, 3, 5, 8, PAL.fog);
+    g.rect(1, 4, 1, 6, PAL.bone); g.rect(0, 6, 5, 2, PAL.moss);
+    return g.outline(PAL.black);
+  }
+  if (kind === 'wrapper') {
+    const g = new Grid(10, 5);
+    g.rect(1, 1, 8, 3, PAL.red); g.rect(0, 0, 2, 2, PAL.ember); g.rect(8, 3, 2, 2, PAL.ember);
+    g.rect(3, 2, 4, 1, PAL.gold);
+    return g.outline(PAL.black);
+  }
+  const g = new Grid(5, 8); // can
+  g.rect(0, 0, 5, 8, PAL.red); g.rect(0, 0, 5, 1, PAL.fog); g.rect(0, 7, 5, 1, PAL.fog);
+  g.rect(0, 3, 5, 2, PAL.bone); g.rect(1, 1, 1, 6, PAL.ember);
+  return g.outline(PAL.black);
+}
+
 export function buildArt(sprite) {
   let seed = 7;
   const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
@@ -289,6 +310,7 @@ export function buildArt(sprite) {
       2: { tex: logSet, face: 'S', faceTex: fogSet(smgPlaque(), sprite) },
     },
     tree: fogSet(treeArt(), sprite),
+    litter: { bottle: fogSet(litterArt('bottle'), sprite), wrapper: fogSet(litterArt('wrapper'), sprite), can: fogSet(litterArt('can'), sprite) },
     zombie: { a: sheet(zombieArt('a'), sprite), b: sheet(zombieArt('b'), sprite), attack: sheet(zombieArt('attack'), sprite) },
     bear: { a: sheet(bearArt('a'), sprite), b: sheet(bearArt('b'), sprite), rear: sheet(bearArt('rear'), sprite) },
     guns: Object.fromEntries([['pistol', pistolArt()], ['shotgun', shotgunArt()], ['smg', smgArt()]]

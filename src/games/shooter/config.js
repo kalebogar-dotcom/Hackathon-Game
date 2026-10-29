@@ -67,6 +67,17 @@ export const BARRICADE = Object.freeze({
   rewardCapPerWave: 50, // ...up to this many points per window per wave (a wave's cap also covers the break after it)
 });
 
+// Educational mission "Protect the Creek" in the break after wave 1. The ecology facts it teaches are real
+// (checked against U.S. EPA Trash Free Waters pages, see README); the zombies and the bear are fiction.
+export const MISSION = Object.freeze({
+  afterWave: 0,      // index of the wave whose break hosts the mission (0 = after wave 1)
+  pickupRange: 0.9,  // tiles from a piece of litter
+  cleanupBonus: 100, // one-time points for collecting all litter (spendable; not part of the combat score)
+  lessonBonus: 50,   // one-time points for the right answer
+  rangerTime: 7,     // seconds the ranger's message stays up
+  explainTime: 6,    // seconds the explanation shows before the question (Enter continues sooner)
+});
+
 // The bear's warning plays during the last seconds of the break before its wave.
 export const BEAR_WARNING = Object.freeze({
   lead: 4.5,                       // starts this many seconds before the boss wave begins
